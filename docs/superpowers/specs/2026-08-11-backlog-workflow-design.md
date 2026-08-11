@@ -92,21 +92,31 @@ prioritize review.
 
 Self-paced loop (via the `loop` skill, no fixed interval). Each tick:
 
-1. Scan `docs/backlog/*.md` for `status: pending`; take the lowest-numbered one.
+1. Check for a stop request: if `docs/backlog/.stop` exists, report a
+   done/failed/pending summary, delete the sentinel, and stop the loop
+   (`ScheduleWakeup({stop: true})`) without picking a new item.
+2. Scan `docs/backlog/*.md` for `status: pending`; take the lowest-numbered one.
    If none remain, report a done/failed summary and stop the loop
    (`ScheduleWakeup({stop: true})`).
-2. Flip the chosen artifact to `status: in-progress` before starting work, so a
+3. Flip the chosen artifact to `status: in-progress` before starting work, so a
    crash mid-tick can't cause it to be silently re-picked.
-3. Run the per-issue Workflow graph (below) against it.
-4. On success: flip to `status: done`, record the PR URL in the artifact.
-5. On failure (unfixable review finding, agent got stuck): flip to
+4. Run the per-issue Workflow graph (below) against it.
+5. On success: flip to `status: done`, record the PR URL in the artifact.
+6. On failure (unfixable review finding, agent got stuck): flip to
    `status: failed` with a `**Failure notes:**` explanation. Failed items are
    skipped on future ticks — a bad artifact can't stall the backlog. Triage is
    manual: fix the artifact and reset to `pending`, or drop it.
-6. Schedule the next tick and repeat.
+7. Schedule the next tick and repeat.
 
 **Cadence:** runs to backlog-empty in one continuous drain, not paused every N
 issues. Review happens whenever the PR queue is checked, not gated by the loop.
+
+**Stopping mid-drain:** creating `docs/backlog/.stop` (an empty file, e.g. via
+`touch`) at any time signals the loop to halt. It's checked at the start of
+each tick — before a new issue is picked — so a stop request always finishes
+whatever issue is already in flight rather than aborting mid-implementation
+and leaving an orphaned branch/worktree. This works whether or not anyone is
+actively watching the conversation.
 
 ### Branch strategy
 
@@ -158,7 +168,8 @@ exist in this repo yet):
 - **`.claude/workflows/backlog-issue.js`** — the named Workflow script
   (Implement → Review → Verify → PR) described above.
 - **`docs/backlog/`** — artifact directory. Read/written only by the two
-  skills above.
+  skills above. Also holds the `.stop` sentinel file (created by the user,
+  deleted by `backlog-drain` once honored) used to halt the drain loop.
 
 Nothing here touches `docs/migration/` or any other in-flight work.
 

@@ -387,8 +387,8 @@ git commit -m "Add backlog-issue Workflow: implement, review, verify, PR"
 - Create: `.claude/skills/backlog-drain/SKILL.md`
 
 **Interfaces:**
-- Consumes: `docs/backlog/*.md` `status` frontmatter (Task 1/2) and the `backlog-issue` return shape (Task 3: `{success, branchName, prUrl, reason, dryRun}`).
-- Produces: updated `status`/`**Result:**`/`**Failure notes:**` in artifact files; drives `/loop` via `ScheduleWakeup`.
+- Consumes: `docs/backlog/*.md` `status` frontmatter (Task 1/2), the `backlog-issue` return shape (Task 3: `{success, branchName, prUrl, reason, dryRun}`), and `docs/backlog/.stop` (a user-created sentinel file).
+- Produces: updated `status`/`**Result:**`/`**Failure notes:**` in artifact files; drives `/loop` via `ScheduleWakeup`; deletes `docs/backlog/.stop` once honored.
 
 - [ ] **Step 1: Write the skill**
 
@@ -409,31 +409,47 @@ interval) so it keeps going across turns without you re-invoking it.
 
 ## One tick
 
-1. List `docs/backlog/*.md`. Read each file's frontmatter.
-2. If no file has `status: pending`, this is the terminal tick:
+1. Check for a stop request first: if `docs/backlog/.stop` exists, this is
+   the terminal tick:
+   - Report a summary: how many artifacts are `done`, `failed`, and still
+     `pending` (with paths, so they can be picked up again later).
+   - Delete `docs/backlog/.stop`.
+   - Call `ScheduleWakeup({ stop: true })` and stop. Do not pick a new item.
+2. List `docs/backlog/*.md`. Read each file's frontmatter.
+3. If no file has `status: pending`, this is the terminal tick:
    - Report a summary: how many artifacts are `done`, how many `failed` (with
      their paths, so they can be triaged), and that the backlog is drained.
    - Call `ScheduleWakeup({ stop: true })` and stop. Do not continue.
-3. Otherwise, pick the file with the lowest numeric prefix among those with
+4. Otherwise, pick the file with the lowest numeric prefix among those with
    `status: pending`.
-4. Edit that file's frontmatter to `status: in-progress` before doing anything
+5. Edit that file's frontmatter to `status: in-progress` before doing anything
    else, so a crash mid-tick can't cause it to be picked again.
-5. Run `Workflow({ name: "backlog-issue", args: { artifactPath: "<that file's path>", dryRun: false } })`.
-6. On a result with `success: true`:
+6. Run `Workflow({ name: "backlog-issue", args: { artifactPath: "<that file's path>", dryRun: false } })`.
+7. On a result with `success: true`:
    - Edit the artifact's frontmatter to `status: done`.
    - Append a `**Result:** PR opened at <prUrl>` line to the artifact body.
-7. On a result with `success: false` (or the Workflow call itself throwing):
+8. On a result with `success: false` (or the Workflow call itself throwing):
    - Edit the artifact's frontmatter to `status: failed`.
    - Append a `**Failure notes:** <reason>` line to the artifact body.
-8. Either way, commit the artifact's status change with a short message
+9. Either way, commit the artifact's status change with a short message
    (e.g. `git commit -m "backlog: mark 003-bots-stuck-at-spirit-healer done"`).
-9. Call `ScheduleWakeup` to continue:
-   - `delaySeconds: 60` (the minimum — there's no external event to wait on,
-     just the next tick starting promptly)
-   - `prompt`: the exact `/loop` invocation used to start this skill (e.g.
-     `"/backlog-drain"`)
-   - `reason`: one line, e.g. `"continuing backlog drain, N pending remaining"`
-   - `noop: false` (a real tick of work happened)
+10. Call `ScheduleWakeup` to continue:
+    - `delaySeconds: 60` (the minimum — there's no external event to wait on,
+      just the next tick starting promptly)
+    - `prompt`: the exact `/loop` invocation used to start this skill (e.g.
+      `"/backlog-drain"`)
+    - `reason`: one line, e.g. `"continuing backlog drain, N pending remaining"`
+    - `noop: false` (a real tick of work happened)
+
+## Stopping the loop
+
+Create `docs/backlog/.stop` (an empty file, e.g. `touch docs/backlog/.stop`)
+at any time to halt the drain after the current issue finishes. It's checked
+at the very start of each tick, before a new issue is picked, so a stop
+request never aborts an issue mid-implementation — it lets whatever's already
+in flight finish (commit, and PR if not dry-run), then halts before starting
+another. This works even if no one is watching the conversation when the
+sentinel is created.
 
 ## Notes
 
@@ -482,18 +498,45 @@ area: docs
 EOF
 ```
 
-Then, following the `backlog-drain` skill's step 1–3 instructions by hand
-(without running step 5's real Workflow call), confirm the selection lands on
+Then, following the `backlog-drain` skill's step 2–4 instructions by hand
+(without running step 6's real Workflow call), confirm the selection lands on
 `002-picking-test-b.md` — the lowest-numbered `pending` file — and that
 `001-picking-test-a.md` (`status: done`) is correctly skipped.
 
-- [ ] **Step 3: Clean up the fixtures**
+- [ ] **Step 3: Smoke-test the stop sentinel**
+
+With the same two fixtures still in place, create the sentinel:
+
+```bash
+touch docs/backlog/.stop
+```
+
+Follow the skill's step 1 instructions by hand: confirm it detects
+`docs/backlog/.stop`, would report a summary (0 done, 0 failed, 1 pending —
+`002-picking-test-b.md`), and would stop before ever reaching step 2's
+pending-file scan (i.e. `001-picking-test-a.md`/`002-picking-test-b.md`
+are never touched). Then confirm cleanup of the sentinel itself:
+
+```bash
+test -f docs/backlog/.stop && echo "STILL THERE (bug)" || echo "removed as expected"
+```
+
+If the skill's own step 1 already deleted it while you traced through the
+logic, that's correct — recreate it with `touch` if you need it again for
+inspection, and delete it manually when done:
+
+```bash
+rm -f docs/backlog/.stop
+```
+
+- [ ] **Step 4: Clean up the fixtures**
 
 ```bash
 rm docs/backlog/001-picking-test-a.md docs/backlog/002-picking-test-b.md
+rm -f docs/backlog/.stop
 ```
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add .claude/skills/backlog-drain/SKILL.md
