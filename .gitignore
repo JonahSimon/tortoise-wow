@@ -13,3 +13,6 @@
 
 # Isolated worktrees for agent-driven implementation work
 /.worktrees/
+
+# backlog-drain stop sentinel: user-created, deleted once honored, never meant to be committed
+/docs/backlog/.stop
