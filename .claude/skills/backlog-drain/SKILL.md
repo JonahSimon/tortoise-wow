@@ -12,6 +12,10 @@ interval) so it keeps going across turns without you re-invoking it.
 
 **Announce when starting a drain session:** "Starting the backlog drain loop."
 
+**First run in an environment?** Do a single supervised tick against a throwaway
+artifact before turning this loose on a real backlog — see
+[Before trusting an unattended run](#before-trusting-an-unattended-run).
+
 ## One tick
 
 1. Check for a stop request first: if `docs/backlog/.stop` exists, this is
@@ -28,35 +32,130 @@ interval) so it keeps going across turns without you re-invoking it.
    restart an `in-progress` file automatically: a human needs to check
    whether a PR was already opened for it before resetting its status to
    `pending` by hand.
-3. If no file has `status: pending`, this is the terminal tick:
+3. Check the recent failure history before starting new work — this is the
+   circuit breaker. This skill keeps no state between ticks other than the
+   filesystem, so read the history out of git: every completed tick commits
+   exactly one subject of the form `backlog: mark <artifact-name> done|failed`
+   (step 10). Run:
+
+   ```
+   git log -n 2 --pretty=format:%s --grep "^backlog: mark " -- :/docs/backlog
+   ```
+
+   (`:/docs/backlog` is deliberate: a plain `docs/backlog` pathspec silently
+   matches nothing when run from a subdirectory, which would silently disable
+   this breaker. `-n 2` applies to matching commits, so unrelated commits in
+   between don't hide the history.)
+
+   If both subjects end in `failed` **and** both of those artifacts (subject
+   `backlog: mark <name> failed` means `docs/backlog/<name>.md`) still have
+   `status: failed` in their frontmatter, this is the terminal tick:
+   - Report both artifacts by path with their `**Failure notes:**`, say the
+     loop stopped deliberately after two consecutive failures rather than
+     grinding the rest of the backlog into `failed`, and list what's still
+     `pending` and untouched.
+   - Call `ScheduleWakeup({ stop: true })` and stop. Do not pick a new item.
+
+   Fewer than two such commits (a fresh backlog) never trips this. An artifact
+   that's been triaged back to `pending` no longer counts as failed here —
+   that's how you clear the breaker before restarting the loop.
+4. If no file has `status: pending`, this is the terminal tick:
    - Report a summary: how many artifacts are `done`, how many `failed` (with
      their paths, so they can be triaged), how many are stuck `in-progress`
      (with paths, same human-check caveat as step 2), and that the backlog is
      drained.
    - Call `ScheduleWakeup({ stop: true })` and stop. Do not continue.
-4. Otherwise, pick the file with the lowest numeric prefix among those with
+5. Otherwise, pick the file with the lowest numeric prefix among those with
    `status: pending`, ignoring any files without a valid 3-digit `NNN-`
    numeric prefix.
-5. Edit that file's frontmatter to `status: in-progress` before doing anything
+6. Edit that file's frontmatter to `status: in-progress` before doing anything
    else, so a crash mid-tick can't cause it to be picked again.
-6. Run `Workflow({ name: "backlog-issue", args: { artifactPath: "<that file's path>", dryRun: false } })`.
-7. On a result with `success: true` **and a `prUrl` present**:
-   - Edit the artifact's frontmatter to `status: done`.
-   - Append a `**Result:** PR opened at <prUrl>` line to the artifact body.
-8. On anything else — `success: false`; `success: true` with no `prUrl`
-   present (a dry-run-shaped result: this tick always calls `backlog-issue`
-   with `dryRun: false`, but it falls back to a dry run itself if it can't
-   confidently tell its args weren't mangled in transit, so this can still
-   happen — treat it as a failure, never as a completed PR); the `Workflow`
-   call throwing; or any other unrecognized or malformed result shape:
-   - Edit the artifact's frontmatter to `status: failed`.
-   - Append a `**Failure notes:** <reason>` line to the artifact body — use
-     the result's `reason` if present, otherwise record what was actually
-     returned or thrown so it's triage-able.
-9. Either way, stage and commit the artifact's status change with a short
-   message (e.g. `git add docs/backlog/003-bots-stuck-at-spirit-healer.md &&
-   git commit -m "backlog: mark 003-bots-stuck-at-spirit-healer done"`).
-10. Call `ScheduleWakeup` to continue:
+7. Run the workflow against it, passing an **absolute** `artifactPath`:
+
+   ```
+   Workflow({ name: "backlog-issue", args: { artifactPath: "<absolute path to that file>", dryRun: false } })
+   ```
+
+   Build the absolute path from the repo root (`git rev-parse --show-toplevel`)
+   plus `docs/backlog/<filename>` — e.g.
+   `D:/CodingProjects/tortoise-wow/tortoise-wow/docs/backlog/003-bots-stuck-at-spirit-healer.md`.
+   Forward slashes are fine on Windows. Do not pass a bare relative path: the
+   artifact is still uncommitted at this point and the Implement phase reads it
+   from its own worktree after switching branches, so a relative path resolves
+   against a working directory this skill doesn't control. The workflow strips
+   the leading directories back off for the PR body, so an absolute path here
+   doesn't end up pasted into GitHub.
+8. Record the outcome. There are three, and they are **not** interchangeable —
+   see [Systemic vs. per-artifact failures](#systemic-vs-per-artifact-failures)
+   for how to tell the last two apart:
+   - **Success** — `success: true` **and** a `prUrl` present:
+     - Edit the artifact's frontmatter to `status: done`.
+     - Append a `**Result:** PR opened at <prUrl>` line to the artifact body.
+   - **Per-artifact failure** — `success: false` with a reason that's about
+     this issue's own implementation, review, or PR:
+     - Edit the artifact's frontmatter to `status: failed`.
+     - Append a `**Failure notes:** <reason>` line to the artifact body — use
+       the result's `reason` if present, otherwise record what was actually
+       returned or thrown so it's triage-able. Include the stale worktree and
+       branch location from step 9's lookup in that same line.
+   - **Systemic failure** — the invocation itself is broken, not this artifact:
+     - Do **not** mark it `failed`. Set its frontmatter back to
+       `status: pending` (reverse the step 6 edit; `git checkout -- <path>`
+       also works if the artifact was already committed) and don't append
+       failure notes — nothing is wrong with the artifact.
+     - Don't commit a status change; there's no outcome to record. Discard the
+       working-tree change instead of committing it.
+     - Report it loudly and specifically, e.g. "This looks **systemic** — the
+       `backlog-issue` invocation itself failed, not
+       `docs/backlog/003-....md`. Nothing was marked failed; that artifact is
+       back at `pending`. N artifacts remain pending and untouched." Quote the
+       raw result or error verbatim, and the args you actually passed.
+     - Skip step 9's cleanup (treat it like `failed`: leave any worktree and
+       branch in place, report the path if one exists).
+     - Call `ScheduleWakeup({ stop: true })` and stop. Do **not** continue to
+       the next tick: a broken invocation would burn the entire backlog to
+       `failed` in minutes, every artifact blamed for something that wasn't
+       its fault.
+9. Find the Implement worktree and clean it up (or deliberately don't). The
+   workflow's Implement phase runs with `isolation: 'worktree'` and always
+   leaves a commit behind, so Workflow's own auto-cleanup-if-unchanged never
+   triggers — each issue otherwise leaves ~400 MB of checkout plus a local
+   branch on disk forever. Locate it by branch name (the result's `branchName`,
+   or `backlog/<artifact filename minus the NNN- prefix and .md>` if the result
+   didn't carry one):
+
+   ```
+   git worktree list --porcelain
+   ```
+
+   Each record is a `worktree <path>` line followed by a
+   `branch refs/heads/<name>` line; take the path whose branch matches.
+   - **On `done`:** the branch is already pushed to origin — that's what the PR
+     is built from — so the local copy is disposable. Run
+     `git worktree remove <path>` then `git branch -D <branch>`, both from the
+     main checkout rather than from inside the worktree. If `git worktree
+     remove` refuses because of leftover untracked files (build output), a
+     `--force` is acceptable *here specifically*, because the work is safely on
+     origin. If no worktree matches, it's already gone — skip.
+   - **On `failed` (or a systemic failure):** remove nothing. The worktree may
+     hold unpushed work worth reading before deciding what to do with the
+     artifact, and the branch is the only copy of it. Record the path in the
+     failure note instead (step 8), e.g. `**Failure notes:** <reason>
+     (worktree left at <path>, branch <branch> — remove both with "git worktree
+     remove <path>" and "git branch -D <branch>" before resetting this artifact
+     to pending)`. If you already wrote that note without the path, edit the
+     line now to add it. If no worktree exists for that branch, say that
+     instead.
+10. Unless step 8 took the systemic path, stage and commit the artifact's
+    status change with a subject in exactly this form — step 3's circuit
+    breaker reads it back:
+    `backlog: mark <artifact filename without .md> <done|failed>`, e.g.
+    `git add docs/backlog/003-bots-stuck-at-spirit-healer.md && git commit -m
+    "backlog: mark 003-bots-stuck-at-spirit-healer done"`.
+11. If the outcome you just recorded was `failed`, re-run step 3's check now
+    (it now includes this tick's commit). If it trips, report as step 3
+    describes and call `ScheduleWakeup({ stop: true })` instead of scheduling
+    another tick. Otherwise call `ScheduleWakeup` to continue:
     - `delaySeconds: 60` (the minimum — there's no external event to wait on,
       just the next tick starting promptly)
     - `prompt`: the same input you'd give `/loop` to restart this skill —
@@ -64,6 +163,34 @@ interval) so it keeps going across turns without you re-invoking it.
       backlog-drain`)
     - `reason`: one line, e.g. `"continuing backlog drain, N pending remaining"`
     - `noop: false` (a real tick of work happened)
+
+## Systemic vs. per-artifact failures
+
+Treating these the same is how a single broken invocation turns an entire
+backlog into `failed` artifacts, each one blamed for the wrong reason.
+
+**Systemic** — the workflow never really ran against this artifact:
+
+- `reason` is `no artifactPath supplied`, or otherwise says the args never
+  arrived. Step 7 always passes one, so this means it didn't get through.
+- `success: true` with **no `prUrl`** — a dry-run-shaped result. This tick
+  always passes `dryRun: false`; `backlog-issue` only falls back to a dry run
+  when it can't confidently tell its args arrived intact, so a dry-run-shaped
+  result on a real tick means the args were mangled in transit. Never record it
+  as a completed PR.
+- The `Workflow` call threw.
+- The result is unrecognizable — not an object, or no `success` field at all.
+
+**Per-artifact** — the workflow ran, and something about *this* issue failed:
+`implement phase failed to produce a change`, `implement phase returned an
+unexpected branch name: ...`, `a review lens did not return a result`,
+`blocking findings not addressed: ...`, `PR phase did not return a pull request
+URL, got: ...`. These are the ones worth marking `failed` and triaging.
+
+The line isn't always crisp — a per-artifact reason that repeats verbatim across
+different artifacts is systemic in effect, whatever it says. That's what step
+3's circuit breaker is for: two consecutive failures stop the loop regardless of
+how each one was classified.
 
 ## Stopping the loop
 
@@ -75,18 +202,53 @@ in flight finish (commit, and PR if not dry-run), then halts before starting
 another. This works even if no one is watching the conversation when the
 sentinel is created.
 
+The loop also stops on its own for three reasons: the backlog is drained (step
+4), two consecutive artifacts failed (step 3), or a failure looked systemic
+(step 8). All three report before stopping.
+
+## Before trusting an unattended run
+
+The exact call this skill makes — `Workflow({ name: "backlog-issue", args:
+{ artifactPath: "...", dryRun: false } })` — has never been exercised
+successfully end to end. During development only an internal `workflow()`
+wrapper form was verified, and args failed to arrive correctly twice while the
+workflow was being built. So before starting a real unattended drain in an
+environment where it hasn't run before:
+
+1. Write one throwaway artifact into `docs/backlog/` scoping a trivial,
+   harmless change.
+2. Run **one** tick by hand, with a human watching, and confirm all of:
+   the workflow got its `artifactPath` (no `no artifactPath supplied`); the
+   result carried a real `prUrl` rather than a dry-run-shaped
+   `{ success: true, dryRun: true }`; the branch is actually on origin; the PR
+   actually exists.
+3. Close the throwaway PR, delete its branch and worktree, and delete the
+   throwaway artifact.
+
+Only then start `/loop backlog-drain` against the real backlog. If the pilot
+tick comes back dry-run-shaped or complaining about `artifactPath`, the
+invocation is broken in this environment — fix that before feeding it a
+backlog. Even after a clean pilot, watch the first few real ticks rather than
+walking away: every non-dry-run tick pushes a branch and opens a PR.
+
 ## Notes
 
 - Every real (non-dry-run) tick pushes a branch and opens a PR on GitHub. This
   is autonomous by design (see
   `docs/superpowers/specs/2026-08-11-backlog-workflow-design.md`) — review
   happens at the PR, not before.
-- `failed` artifacts are never retried automatically. Fix the artifact (or the
-  underlying ambiguity that caused the failure) and reset its `status` to
-  `pending` by hand to give it another attempt.
+- `failed` artifacts are never retried automatically. To give one another
+  attempt, in this order: read its `**Failure notes:**`; remove the stale
+  worktree and branch the failed attempt left behind (`git worktree remove
+  <path>` then `git branch -D <branch>` — the note records both); fix the
+  artifact or the underlying ambiguity that caused the failure; then set
+  `status: pending` by hand. Skipping the worktree removal makes the retry fail
+  again with a confusing, unrelated-looking error — git refuses to check out a
+  branch that's already checked out in another worktree.
 - `in-progress` artifacts left behind by a crashed tick are surfaced every
   tick (never silently ignored) but never auto-recovered: check whether a PR
   was already opened for it before resetting its `status` to `pending` by
-  hand.
-- Branches are independent — each is cut fresh from `playerbots-integration-gh`
-  when its tick starts, never from another backlog branch.
+  hand, and clean up its worktree and branch first, exactly as for `failed`.
+- Branches are independent — each is cut fresh from
+  `origin/playerbots-integration-gh` when its tick starts, never from another
+  backlog branch.
