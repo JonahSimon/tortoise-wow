@@ -2421,11 +2421,16 @@ void PlayerbotHolder::CreateBot(Player* master, const std::string param, std::li
             ChangeTalentsAction::AutoSelectTalents(newBot, &out, role);
 
             sRandomPlayerbotMgr.SetValue(botGuid, "create levelup", 1);
-            sRandomPlayerbotMgr.SetValue(botGuid, "create group", 1, groupWith);
             sRandomPlayerbotMgr.SetValue(botGuid, "create gear", 1, gear);
         }
         else
             newBot->SetLevel(1);
+
+        // Grouping is meaningful at every level; gear/talents are not.
+        // HandleGroup passes the master's level into create, so level-1 masters
+        // never got the deferred auto-invite pass while this lived inside level > 1.
+        if (!groupWith.empty())
+            sRandomPlayerbotMgr.SetValue(botGuid, "create group", 1, groupWith);
 
         if (!testName.empty())
         {
@@ -2445,6 +2450,48 @@ void PlayerbotHolder::CreateBot(Player* master, const std::string param, std::li
         }
 
         newBot->SaveToDB();
+
+        // The throwaway botSession never had SetPlayer() called on it, so
+        // LogoutPlayer()'s `if (_player)` body — which normally registers the
+        // character — is a no-op. Without this, the new character is missing from
+        // m_playerNameToGuid (breaking `.rndbot add/summon <name>`) and from
+        // m_playerCacheData (so GetPlayerAccountIdByGUID returns 0 and
+        // AddPlayerBot refuses to log the bot in, retrying every tick forever).
+        //
+        // 2026-08-09: LoadPlayerCacheData alone did not fix mid-session create
+        // (Agardregs/4509). Probe the cache after the re-SELECT; if still empty
+        // (likely commit/visibility H1), insert from the in-memory Player.
+        {
+            ObjectGuid cacheGuid(HIGHGUID_PLAYER, botGuid);
+            uint32 acctBefore = sObjectMgr.GetPlayerAccountIdByGUID(cacheGuid);
+            sLog.outString("CreateBotCacheDbg: post-SaveToDB guid=%u name=%s sessionAccount=%u cacheAccount=%u",
+                botGuid, name.c_str(), accountId, acctBefore);
+
+            sObjectMgr.LoadPlayerCacheData(botGuid);
+
+            uint32 acctAfterLoad = sObjectMgr.GetPlayerAccountIdByGUID(cacheGuid);
+            ObjectGuid byName = sObjectMgr.GetPlayerGuidByName(name);
+            sLog.outString("CreateBotCacheDbg: post-LoadPlayerCacheData guid=%u cacheAccount=%u nameGuid=%u",
+                botGuid, acctAfterLoad, byName.GetCounter());
+
+            if (!acctAfterLoad)
+            {
+                if (PlayerCacheData* cache = sObjectMgr.InsertPlayerInCache(newBot))
+                {
+                    sLog.outString("CreateBotCacheDbg: fallback InsertPlayerInCache ok guid=%u account=%u name=%s",
+                        botGuid, cache->uiAccount, cache->sName.c_str());
+                }
+                else
+                {
+                    sLog.outError("CreateBotCacheDbg: fallback InsertPlayerInCache FAILED guid=%u (null session?)",
+                        botGuid);
+                }
+            }
+            else
+            {
+                sLog.outString("CreateBotCacheDbg: LoadPlayerCacheData alone succeeded guid=%u", botGuid);
+            }
+        }
 
         messages.push_back("Bot created: " + name);
 
