@@ -10,3 +10,6 @@
 *.bak
 *.bak.*
 *.bak-*
+
+# Isolated worktrees for agent-driven implementation work
+/.worktrees/
