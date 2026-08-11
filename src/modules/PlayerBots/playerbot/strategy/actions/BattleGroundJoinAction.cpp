@@ -582,6 +582,14 @@ bool BGJoinAction::isUseful()
     if (!bot->HasFreeBattleGroundQueueId())
         return false;
 
+    // An explicitly-set "bg type" is a decision already made -- by an operator via
+    // `.rndbot debug <bot> setvalueuin32 bg type,N`, or by the RPG battlemaster path
+    // (RpgSubActions.h:258). Execute() honours it directly and never consults bgList,
+    // so re-rolling the ambient composition heuristics here would only add variance
+    // to a choice that was not ours to make.
+    if (AI_VALUE(uint32, "bg type"))
+        return true;
+
     // reduce amount of healers in BG
     if ((ai->IsTank(bot, false) || ai->IsHeal(bot, false)) && urand(0, 100) > 20)
         return false;
