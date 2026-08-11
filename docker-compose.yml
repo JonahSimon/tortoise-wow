@@ -1,0 +1,92 @@
+# Tortoise-WoW 1.18.1 — launched from the source checkout.
+#
+# Runtime state (extracted client data, tuned configs, logs, and the world
+# database volume) is NOT duplicated here. It stays in the WSL stack directory
+# and is bind-mounted in through the paths in .env, so this file can be run from
+# the repo without copying several gigabytes of mmaps or re-importing the world.
+
+# PINNED. Compose otherwise derives the project name from the directory basename,
+# which would point the stack at a new, empty database volume.
+name: tortoise-wow-v2
+
+services:
+  db:
+    # 10.6, NOT 11.8. sql/create_databases.sql is a MariaDB 10.6 dump using
+    # utf8mb4_general_ci; 11.8 defaults new databases to utf8mb4_uca1400_ai_ci and
+    # joins between the two raise "Illegal mix of collations". Matching the dump's
+    # own version avoids the problem rather than repairing it afterwards.
+    image: mariadb:10.6
+    container_name: tw2-db
+    restart: "no"
+    environment:
+      MARIADB_ROOT_PASSWORD: "${DB_PASS:?set DB_PASS in .env}"
+      MARIADB_USER: mangos
+      MARIADB_PASSWORD: "${DB_PASS}"
+      MARIADB_DATABASE: tw_world
+    volumes:
+      - dbdata:/var/lib/mysql
+    ports:
+      # Host-side access only, for mysql/Navicat; the servers reach it over the
+      # compose network as "db".
+      - "127.0.0.1:3309:3306"
+    command:
+      - --sql-mode=NO_ENGINE_SUBSTITUTION
+      - --max_allowed_packet=256M      # sql/base has single files over 100 MB
+      - --innodb-buffer-pool-size=512M
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    networks: [tw2-net]
+
+  realmd:
+    image: "${TW_IMAGE:-tortoise-v2:local}"
+    container_name: tw2-realmd
+    restart: "no"
+    depends_on:
+      db: { condition: service_healthy }
+    ports:
+      - "3724:3724"
+    volumes:
+      - "${TW_ETC:?set TW_ETC in .env}:/opt/turtle/etc"
+      - "${TW_LOGS:?set TW_LOGS in .env}:/opt/turtle/logs"
+    working_dir: /opt/turtle/bin
+    command: ["./realmd", "-c", "/opt/turtle/etc/realmd.conf"]
+    networks: [tw2-net]
+
+  mangosd:
+    image: "${TW_IMAGE:-tortoise-v2:local}"
+    container_name: tw2-mangosd
+    restart: "no"
+    depends_on:
+      db: { condition: service_healthy }
+    ports:
+      # 8095, NOT the stock 8090. MUST match WorldServerPort in mangosd.conf AND
+      # the tw_logon.realmlist row, or the client logs in and then hangs before
+      # character selection: it was handed a port nobody is listening on.
+      - "8095:8095"
+    volumes:
+      - "${TW_ETC:?set TW_ETC in .env}:/opt/turtle/etc"
+      - "${TW_DATA:?set TW_DATA in .env}:/opt/turtle/data"
+      # NOT :ro — the DB auto-updater creates sql/unused/ on boot and a read-only
+      # mount crashes mangosd with "cannot create directory ... Read-only".
+      - ./sql:/opt/turtle/sql
+      - "${TW_LOGS:?set TW_LOGS in .env}:/opt/turtle/logs"
+    working_dir: /opt/turtle/bin
+    command: ["./mangosd", "-c", "/opt/turtle/etc/mangosd.conf"]
+    # mangosd needs a console on stdin or it exits immediately with no error.
+    stdin_open: true
+    tty: true
+    networks: [tw2-net]
+
+volumes:
+  # EXTERNAL on purpose. This volume is the entire world — every character and all
+  # progression. Declaring it external means compose will never create a blank one
+  # by accident, and it is why `docker compose down -v` must never be run here.
+  dbdata:
+    external: true
+    name: tortoise-wow-v2_dbdata
+
+networks:
+  tw2-net:
