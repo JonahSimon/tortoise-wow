@@ -46,13 +46,25 @@ fail=0
 # Missing runtime libraries do not surface at compile time. Shipping
 # libboost-system instead of libboost-thread once killed mangosd instantly while
 # realmd started fine, which read as a config problem rather than a link problem.
+#
+# Two distinct failures need two distinct checks. `ldd` on a binary that is not
+# there writes "No such file or directory" to STDERR, so a grep reading only
+# stdout matches nothing, `|| true` swallows the exit code, and the binary reads
+# as healthy — which is exactly how a build that silently produced no mangosd
+# would sail through and get promoted onto the tag a live server runs from.
+# Verified empirically: deleting only /opt/turtle/bin/mangosd from a known-good
+# image produced "ok: mangosd links cleanly". So test existence first, and fold
+# stderr into the grep so neither failure can pass quietly.
 for b in mangosd realmd; do
+  if ! docker run --rm tortoise-v2:candidate test -x "/opt/turtle/bin/$b"; then
+    echo "  FAIL: $b is missing from the image"; fail=1; continue
+  fi
   missing=$(docker run --rm tortoise-v2:candidate \
-              sh -c "ldd /opt/turtle/bin/$b | grep 'not found' || true")
+              sh -c "ldd /opt/turtle/bin/$b 2>&1 | grep 'not found' || true")
   if [ -n "$missing" ]; then
     echo "  FAIL: $b has unresolved libraries:"; echo "$missing"; fail=1
   else
-    echo "  ok: $b links cleanly"
+    echo "  ok: $b exists and links cleanly"
   fi
 done
 
