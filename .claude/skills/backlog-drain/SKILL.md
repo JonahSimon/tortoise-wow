@@ -244,7 +244,10 @@ walking away: every non-dry-run tick pushes a branch and opens a PR.
   artifact or the underlying ambiguity that caused the failure; then set
   `status: pending` by hand. Skipping the worktree removal makes the retry fail
   again with a confusing, unrelated-looking error — git refuses to check out a
-  branch that's already checked out in another worktree.
+  branch that's already checked out in another worktree. If the failed attempt
+  got as far as pushing (the failure was `PR phase did not return a pull request
+  URL`), delete the remote branch too (`git push origin --delete <branch>`), or
+  the retry's push will be rejected as non-fast-forward.
 - `in-progress` artifacts left behind by a crashed tick are surfaced every
   tick (never silently ignored) but never auto-recovered: check whether a PR
   was already opened for it before resetting its `status` to `pending` by

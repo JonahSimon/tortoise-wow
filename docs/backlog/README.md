@@ -47,7 +47,9 @@ tables — what breaks, under what load, traced to what.
   (`git worktree remove <path>` then `git branch -D <branch>`) — git refuses to
   check out a branch that's still checked out in another worktree, so a retry
   with the old one on disk just fails again with a confusing, unrelated-looking
-  error — then fix the artifact and reset it to `pending`.
+  error — then fix the artifact and reset it to `pending`. If the failed attempt
+  had already pushed its branch, delete it from `origin` as well, or the retry's
+  push is rejected as non-fast-forward.
 
 ## Producing artifacts
 
