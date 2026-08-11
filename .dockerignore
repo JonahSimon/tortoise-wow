@@ -1,0 +1,29 @@
+# The build context is the repo root. Everything listed here is either useless to
+# the compiler or actively harmful in a layer.
+
+# 139 MB of history with no business in the build context. Excluding it also keeps
+# cmake/revision.h.cmake on its no-git fallback, so the compiled revision string
+# does not shift underneath us between builds of the same commit. This is why
+# `Release:` in the mangosd log reads 1970-01-01 — expected, not a bug.
+.git
+.github
+.gitignore
+
+# 131 MB of world content. Nothing in the build reads it: cmake/migrations.cmake
+# globs sql/migrations/*.sql, that directory does not exist, and no CMakeLists
+# includes migrations.cmake at all. The server reads sql/ from a bind mount at
+# runtime, not from the image.
+sql/base/
+
+# Docs, plans and agent scratch space. Without these, every doc edit invalidates
+# the COPY layer and forces a full ~30-minute recompile.
+docs/
+.claude/
+.worktrees/
+*.md
+
+# Local build output, if anyone has configured in-tree.
+build/
+
+# Secrets. Must never enter a layer.
+.env
