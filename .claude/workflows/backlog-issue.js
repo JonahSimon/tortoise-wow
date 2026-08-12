@@ -177,10 +177,15 @@ const reviews = await parallel(lenses.map((lens) => () =>
   agent(
     `${lens.prompt}
 
-     Branch "${branchName}" has the change. Branch refs are shared
-     across worktrees in this repository, so run "git diff playerbots-integration-gh...${branchName}"
-     directly from wherever you are -- no need to locate or check out that
-     branch's worktree.
+     Branch "${branchName}" has the change. Branch and remote-tracking refs are
+     shared across worktrees in this repository, so run
+     "git diff origin/playerbots-integration-gh...${branchName}" directly from
+     wherever you are -- no need to locate or check out that branch's worktree.
+     Diff against origin/playerbots-integration-gh, never the bare local
+     playerbots-integration-gh: the branch was cut from origin (the Implement
+     phase fetched it), and the local ref can lag behind, which would drag
+     already-merged upstream commits into what you're reviewing as if they were
+     part of this change.
      Artifact for context: ${artifactPath}.
 
      Report every real finding with a one-sentence summary, the file it's in,

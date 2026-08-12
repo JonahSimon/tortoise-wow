@@ -130,13 +130,32 @@ artifact before turning this loose on a real backlog — see
 
    Each record is a `worktree <path>` line followed by a
    `branch refs/heads/<name>` line; take the path whose branch matches.
-   - **On `done`:** the branch is already pushed to origin — that's what the PR
-     is built from — so the local copy is disposable. Run
-     `git worktree remove <path>` then `git branch -D <branch>`, both from the
-     main checkout rather than from inside the worktree. If `git worktree
-     remove` refuses because of leftover untracked files (build output), a
-     `--force` is acceptable *here specifically*, because the work is safely on
-     origin. If no worktree matches, it's already gone — skip.
+   - **On `done`:** confirm the branch really reached origin *before* deleting
+     anything. A well-formed `prUrl` only proves an agent returned a URL-shaped
+     string; the worktree may still hold the only copy of the work. Run:
+
+     ```
+     git ls-remote --heads origin <branch>
+     ```
+
+     and require a line ending in exactly `refs/heads/<branch>`. Judge by the
+     output, not the exit status: `git ls-remote` exits 0 with empty output when
+     nothing matches, and it matches by ref tail, so a bare component like
+     `my-fix` would also match `refs/heads/backlog/my-fix`.
+     - **On origin:** the local copy is disposable. Run
+       `git worktree remove <path>` then `git branch -D <branch>`, both from the
+       main checkout rather than from inside the worktree. If `git worktree
+       remove` refuses because of leftover untracked files (build output), a
+       `--force` is acceptable *here specifically*, because the work is safely
+       on origin. If no worktree matches, it's already gone — skip.
+     - **Not on origin:** delete nothing — not the worktree, not the branch.
+       The PR phase reported a URL for a branch that isn't on the remote, so
+       either the push never happened or the URL was invented, and the local
+       branch is the only copy of the change. Keep both exactly as the `failed`
+       path does, report the discrepancy prominently (quote the `prUrl` and say
+       the branch is absent from origin), and record the worktree path in the
+       artifact alongside its `**Result:**` line so a human can check before
+       anything is lost.
    - **On `failed` (or a systemic failure):** remove nothing. The worktree may
      hold unpushed work worth reading before deciding what to do with the
      artifact, and the branch is the only copy of it. Record the path in the
