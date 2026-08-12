@@ -248,7 +248,26 @@ bool FindPointGameObjectData::operator()(GameObjectDataPair const& dataPair)
 runs on every `UseTransport` call, for every bot waiting at a dock, every tick. With ~1000 bots
 that is a meaningful CPU sink on its own, independent of the correctness bug.
 
-**Fix — resolve through the live map and bound the search.**
+**A radius bound is the wrong fix for (b), on both counts.** An earlier revision of this section
+proposed passing `200.0f`. That was wrong twice over:
+
+- *It does not reduce the walk.* Read the predicate above again: `DoGOData` iterates the entire
+  `m_GameObjectDataMap` and the predicate always returns `false`, so it never breaks early. The
+  radius only decides which spawns get pushed into the result vector. The scan costs exactly the
+  same at `200.0f` as at `0.0f`; the bound buys nothing at all.
+- *It silently breaks the tram, the very spawn this fix exists to locate.* Callers pass a **dock**
+  position and pick the nearest match themselves afterwards, so the transport is routinely far
+  from the query point. The six Deeprun Tram cars (`sql/base/tw_world_gameobject.sql`, guids
+  18802-18807, entries 176080-176085) sit in two clusters on map 369 — three at y≈2472-2512 and
+  three at y≈-11-28, ~2460y apart. A bot at one platform is >2400y from three of the cars, so a
+  200y filter returns nothing where the unbounded scan at least located the spawn row.
+
+Making this branch cheap requires an **entry-indexed lookup** into the GO spawn data (or caching
+the per-map/per-entry result), not a distance filter. That is tracked separately as backlog
+artifact `010-index-go-spawn-lookup-by-entry.md`; the fix below deliberately leaves the scan
+unbounded and fixes only the guid bug and the missing null check.
+
+**Fix — resolve through the live map, and leave the search unbounded.**
 
 ```cpp
 std::set<GenericTransport*> WorldPosition::getTransports(uint32 entry)
@@ -265,9 +284,15 @@ std::set<GenericTransport*> WorldPosition::getTransports(uint32 entry)
 
     if (transports.empty() || !entry) //Elevators&trams
     {
-        // Bound the scan: an unbounded radius walks every GO spawn on the map on every call.
-        // 200y comfortably covers a tram tunnel segment or a lift shaft from any dock node.
-        for (auto gopair : getGameObjectsNear(200.0f, entry))
+        // Deliberately unbounded. Callers pass a *dock* position and do their own
+        // distance selection afterwards, so the transport itself is routinely far away:
+        // the six Deeprun Tram cars sit in two clusters ~2460y apart on map 369, so any
+        // radius small enough to be worth calling a bound hides half of them from the
+        // dock the bot is standing on. A radius would not buy anything here either —
+        // DoGOData walks the whole spawn map regardless (the predicate never breaks) and
+        // the radius only prunes the result vector. Making this cheap needs an
+        // entry-indexed lookup, not a distance filter.
+        for (auto gopair : getGameObjectsNear(0.0f, entry))
         {
             // gopair->first is a spawn id, not an ObjectGuid — build the full guid before lookup.
             ObjectGuid guid(HIGHGUID_GAMEOBJECT, gopair->second.id, gopair->first);
@@ -285,8 +310,8 @@ std::set<GenericTransport*> WorldPosition::getTransports(uint32 entry)
 `ObjectGuid(HighGuid, uint32 entry, uint32 counter)` is the three-argument constructor at
 `src/game/ObjectGuid.h:129`, and `GameObjectData::id` is the GO entry.
 
-Note that (b) alone does not fix elevators or the tram — see D3. But it makes the code honest and
-removes the per-tick full-map scan.
+Note that this alone does not fix elevators or the tram — see D3. It makes the lookup correct; the
+per-tick full-map scan (b) is still there, and needs the entry index tracked in artifact 010.
 
 ### D3 — this core has no server-side transport type for elevators and trams
 
