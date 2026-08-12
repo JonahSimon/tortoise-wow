@@ -4,8 +4,8 @@
 # Run from WSL:   ./scripts/rebuild.sh
 #                 BUILD_JOBS=1 ./scripts/rebuild.sh     # if the VM OOMs
 #
-# Builds to tortoise-v2:candidate, runs three acceptance checks, and moves the
-# :local tag ONLY if all three pass. A failed check leaves :local pointing at
+# Builds to tortoise-v2:candidate, runs its acceptance checks, and moves the
+# :local tag ONLY if every one passes. A failed check leaves :local pointing at
 # whatever was working before, so a bad build cannot take the server with it.
 #
 # This script deliberately does NOT stop, start or restart the stack. Apply a new
@@ -66,6 +66,12 @@ for b in mangosd realmd; do
   else
     echo "  ok: $b exists and links cleanly"
   fi
+
+  # Executing it is strictly stronger than inspecting it: this is the loader
+  # failure actually happening rather than being inferred from `ldd` output.
+  if ! docker run --rm tortoise-v2:candidate "/opt/turtle/bin/$b" --version >/dev/null 2>&1; then
+    echo "  FAIL: $b exists and links, but will not execute"; fail=1
+  fi
 done
 
 # BUILD_PLAYERBOTS defaults OFF, and a bot-free build warns about nothing at all.
@@ -76,11 +82,13 @@ else
   echo "  FAIL: built without -DBUILD_PLAYERBOTS=ON"; fail=1
 fi
 
-if [ -n "$(docker run --rm tortoise-v2:candidate ls /opt/turtle/extractors)" ]; then
-  echo "  ok: extractors present"
-else
-  echo "  FAIL: no extractors collected"; fail=1
-fi
+for x in mapextractor vmapextractor; do
+  if docker run --rm tortoise-v2:candidate test -x "/opt/turtle/extractors/$x"; then
+    echo "  ok: $x present"
+  else
+    echo "  FAIL: $x missing from /opt/turtle/extractors"; fail=1
+  fi
+done
 
 if [ "$fail" -ne 0 ]; then
   echo "==> verification FAILED. tortoise-v2:local left untouched." >&2
@@ -88,6 +96,21 @@ if [ "$fail" -ne 0 ]; then
 fi
 
 docker tag tortoise-v2:candidate tortoise-v2:local
-docker tag tortoise-v2:candidate "tortoise-v2:$SHA"
-echo "==> promoted to tortoise-v2:local and tortoise-v2:$SHA"
+
+# Never move an existing commit tag. Two ways that bites: rebuilding twice at the
+# same HEAD leaves the first image dangling and prunable, and running this script
+# on a checkout of c06b2fb would overwrite the ROLLBACK ANCHOR with fresh bytes —
+# the Dockerfile pins debian:trixie, a rolling tag, so a rebuild years later is
+# not the same image. A dirty tree gets its own suffix for the same reason.
+SHA_TAG="tortoise-v2:$SHA"
+[ "$DIRTY" -ne 0 ] && SHA_TAG="tortoise-v2:$SHA-dirty"
+if docker image inspect "$SHA_TAG" >/dev/null 2>&1; then
+  echo "==> $SHA_TAG already exists and was NOT moved."
+  echo "    :local now points at the new build; the commit tag still points at the old one."
+else
+  docker tag tortoise-v2:candidate "$SHA_TAG"
+  echo "==> also tagged $SHA_TAG"
+fi
+
+echo "==> promoted to tortoise-v2:local"
 echo "    apply it when ready:  docker compose up -d"

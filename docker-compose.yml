@@ -18,6 +18,11 @@ services:
     image: mariadb:10.6
     container_name: tw2-db
     restart: "no"
+    # SIGTERM to SIGKILL default is 10s; MariaDB needs longer to flush a
+    # multi-GB InnoDB buffer pool to the bind-mounted volume. A SIGKILL here
+    # means an unclean InnoDB shutdown on a volume that has been lost once
+    # already.
+    stop_grace_period: 120s
     environment:
       MARIADB_ROOT_PASSWORD: "${DB_PASS:?set DB_PASS in .env}"
       MARIADB_USER: mangos
@@ -43,7 +48,9 @@ services:
   realmd:
     image: "${TW_IMAGE:-tortoise-v2:local}"
     container_name: tw2-realmd
-    restart: "no"
+    # Docker is the supervisor for this process; see mangosd below for why
+    # "no" left the world offline while realmd kept answering logins.
+    restart: unless-stopped
     depends_on:
       db: { condition: service_healthy }
     ports:
@@ -58,7 +65,16 @@ services:
   mangosd:
     image: "${TW_IMAGE:-tortoise-v2:local}"
     container_name: tw2-mangosd
-    restart: "no"
+    # mangosd schedules its OWN restart (AutoHonorRestart=1 in mangosd.conf) and
+    # exits 0 expecting a supervisor to start it again. With `restart: "no"` that
+    # exit left the world offline indefinitely while realmd kept answering logins,
+    # which presents as "client hangs before character select" and sends you
+    # hunting a port mismatch that isn't there. Docker is the supervisor.
+    restart: unless-stopped
+    # SIGTERM handler saves every online session and drains the async DB queue
+    # before exiting; the default 10s grace period SIGKILLs mid-save and loses
+    # character progress. Give it real time to finish.
+    stop_grace_period: 120s
     depends_on:
       db: { condition: service_healthy }
     ports:

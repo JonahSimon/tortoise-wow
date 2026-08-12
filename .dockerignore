@@ -25,5 +25,14 @@ docs/
 # Local build output, if anyone has configured in-tree.
 build/
 
+# Churny paths that have no business in the build context: anything here that
+# changes still forces a full recompile of the COPY . /src layer even though
+# none of it affects the compiled binary.
+.superpowers/
+fork-migration/
+scripts/
+docker-compose.yml
+.env.example
+
 # Secrets. Must never enter a layer.
-.env
+.env*
