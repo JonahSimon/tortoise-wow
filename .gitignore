@@ -26,29 +26,14 @@
 # Local Docker environment — contains the database password.
 .env
 
-# Raw dumps of the private ops repo's scripts/ and tests/, staged here for the
-# migration in docs/superpowers/plans/2026-08-11-ops-scripts-migration.md. This
-# fork is PUBLIC and these are NOT cleared for it: the owner ruled the whole
-# client-switcher workstream stays off the fork, and oldTests/ carried a real
-# third-party home-server IP (redacted in place, but the ruling stands either
-# way). Ignored so a stray `git add -A` cannot publish 65 unreviewed files.
-# The migration copies vetted files into scripts/ and tests/ deliberately, one
-# at a time, behind that plan's audit gate — it never stages these directories.
+# Raw dumps from the private ops repo (ChrisMiho/turtle-tournament). Deleted
+# 2026-08-12 once verified recoverable from it — these rules stay as a standing
+# guard, because re-dumping to extract something is the obvious next move and
+# this fork is PUBLIC. What was in them: a real DB_PASS in a backup .env, a
+# third party's CGNAT home-server address, and the client-switcher workstream
+# the owner ruled off this fork regardless of content.
 #
-# They are also REDUNDANT, not a last copy: TRUNK-SEED-HANDOFF.md §1 verified
-# them byte-identical to ChrisMiho/turtle-tournament's `proper-setup` branch,
-# a private repo still intact at D:\TurtleWow with a live remote. The dumps are
-# in fact a strict SUBSET — §2 found two workstreams that live only on that
-# repo's origin/main and appear in no dump at all. Committing these would
-# preserve less than what is already preserved, at the cost of publishing:
-#   - OldHandoffs/backups/pre-alive-world-*/.env — a REAL 18-char DB_PASS, not
-#     a ${VAR} or __PLACEHOLDER__. Verified by assignment shape, value unread.
-#   - a third party's CGNAT home-server address, in 4 files
-#   - .ts.net / tailnet identifiers, in 3 more
+# If you re-dump, keep them ignored and copy vetted files out one at a time.
 /OldScripts/
 /oldTests/
 /OldHandoffs/
-
-# Superseded by TRUNK-SEED-HANDOFF.md on the "nothing is lost" question, and
-# kept on disk only as a trail. Clean of identifiers, but nothing reads it.
-/NEXT-SESSION-HANDOFF.md
