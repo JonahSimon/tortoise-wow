@@ -23,10 +23,15 @@ directory. That is deliberate: the extracted client data is several gigabytes an
 the configs are tuned, so both are reused rather than duplicated.
 
 `DB_PASS` reaches the database container as an environment variable, so anyone
-who can run `docker inspect tw2-db` can read the root password in plaintext. The
-verify command below also puts it on a command line inside the container, where
-it is visible to `ps`. Both are normal for this kind of stack — but treat docker
-access as equivalent to database access.
+who can run `docker inspect tw2-db` can read the root password in plaintext.
+Treat docker access as equivalent to database access.
+
+The verify command below deliberately passes the password via `MYSQL_PWD` rather
+than `--password=`. A password given as a command-line flag is visible in `ps`
+inside the container and lands in shell history; `MYSQL_PWD` avoids both. The
+repo's public-safety gate (`turtle-ops/scripts/audit-public-safe.sh`) blocks on
+`--password=` for exactly this reason — if you reintroduce that form, the gate
+will refuse the next push, and it is right to.
 
 ## Start / stop
 
@@ -62,7 +67,7 @@ A bound port only proves `docker-proxy` answered. Check the population:
 
 ```bash
 P=$(tr -d '\r\n' < /home/deck/tortoise-wow-server-V2/.dbpass)
-docker exec -i tw2-db mysql -uroot --password="$P" -N -e \
+docker exec -i -e MYSQL_PWD="$P" tw2-db mysql -uroot -N -e \
   "SELECT CONCAT(name,'  port=',port,'  realmflags=',realmflags) FROM tw_logon.realmlist;
    SELECT CONCAT('characters online: ',COUNT(*)) FROM tw_char.characters WHERE online=1;" \
   2>/dev/null
