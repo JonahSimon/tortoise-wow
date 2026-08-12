@@ -20,6 +20,12 @@
 
 using namespace ai;
 
+//How often MinimalMove tries to board the same flight path before giving up on that leg and
+//continuing over land. Boarding an unobserved bot can fail permanently (the leg's source node is
+//not in its taximask and there is no flightmaster nearby to learn it from), so retries must be
+//bounded or the bot never advances its path again.
+static const uint32 MINIMAL_MOVE_TAXI_ATTEMPTS = 3;
+
 void MovementAction::CreateWp(Player* wpOwner, float x, float y, float z, float o, uint32 entry, bool important)
 {
     float dist = wpOwner->GetDistance(x, y, z);
@@ -543,11 +549,35 @@ bool MovementAction::MinimalMove(PlayerbotAI* ai)
             return true;
         }
 
-        bool didTaxi = UseTaxi(ai, nextStep->entry, false);
+        const uint32 taxiEntry = nextStep->entry;
+
+        if (lastMove.taxiFailEntry != taxiEntry) //Failures are counted per leg.
+        {
+            lastMove.taxiFailEntry = taxiEntry;
+            lastMove.taxiFailCount = 0;
+        }
+
+        bool didTaxi = UseTaxi(ai, taxiEntry, false);
+
+        if (!didTaxi && ++lastMove.taxiFailCount < MINIMAL_MOVE_TAXI_ATTEMPTS) //We did not board so keep the flight path and try again later.
+        {
+            ai->TellDebug(ai->GetMaster(), "Failed to board taxi " + std::to_string(taxiEntry) + " (attempt " + std::to_string(lastMove.taxiFailCount) + "). Retrying flight path.", "debug move");
+
+            return true;
+        }
+
+        //Either we boarded or we are out of attempts. Boarding can fail for good (unknown taxi
+        //node with no flightmaster around to learn it from), so drop the leg rather than wedge
+        //on it: the remaining path is then walked/teleported as if there were no flight path.
+        if (!didTaxi)
+            ai->TellDebug(ai->GetMaster(), "Failed to board taxi " + std::to_string(taxiEntry) + " " + std::to_string(lastMove.taxiFailCount) + " times. Skipping flight path.", "debug move");
+
+        lastMove.taxiFailEntry = 0;
+        lastMove.taxiFailCount = 0;
 
         for (auto& step : path)
         {
-            if (step.type == PathNodeType::NODE_FLIGHTPATH && step.entry == nextStep->entry)
+            if (step.type == PathNodeType::NODE_FLIGHTPATH && step.entry == taxiEntry)
                 continue;
 
             lastMove.lastPath.cutTo(step, false); //Remove path until next walk or taxi.

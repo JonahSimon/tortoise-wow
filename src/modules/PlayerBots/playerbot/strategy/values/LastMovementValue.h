@@ -24,6 +24,8 @@ namespace ai
             nextTeleport = other.nextTeleport;
             fleeCount = other.fleeCount;
             lastFleeAttempt = other.lastFleeAttempt;
+            taxiFailEntry = other.taxiFailEntry;
+            taxiFailCount = other.taxiFailCount;
             moveEvent = Event();
         }
 
@@ -38,6 +40,8 @@ namespace ai
             lastFleeAttempt = 0;
             lastMoveShort = WorldPosition();
             nextTeleport = 0;
+            taxiFailEntry = 0;
+            taxiFailCount = 0;
             moveEvent = Event();
         }
 
@@ -64,6 +68,12 @@ namespace ai
         TravelPath lastPath;
         WorldPosition lastMoveShort;
         time_t nextTeleport;
+        // Taxi path id that MinimalMove is currently failing to board, and how many attempts it
+        // has made. Boarding can fail deterministically (unknown taxi node, no flightmaster to
+        // learn it from), so the retries are capped and the leg is then skipped instead of the
+        // bot wedging on it forever. Reset once the leg is boarded or abandoned.
+        uint32 taxiFailEntry;
+        uint32 taxiFailCount;
         Event moveEvent;
     };
 
