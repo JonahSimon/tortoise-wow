@@ -461,9 +461,17 @@ class Map : public GridRefManager<NGridType>
         bool HasActiveZones() const { return true; }
         // HasRealPlayers: cmangos checks if any non-bot players are on the map. Stub returns true.
         bool HasRealPlayers() const { return true; }
-        // GetTransports: cmangos has Map::GetTransports returning a set/vector. Stub returns empty vector.
+        // GetTransports: cmangos has Map::GetTransports returning a set/vector. Here it copies the
+        // live _transports set (MO-transports: boats/zeppelins) into a vector for the bot lookup.
         // Note: GenericTransport is a typedef in shim; forward-decl as struct avoids "class" keyword conflict.
-        std::vector<class Transport*> GetTransports() const { return {}; }
+        // Bots query a *different* map's transports than the one they are updating on (the cross-map
+        // dock case), and continent maps update on parallel threads while Transport::TeleportTransport
+        // erases/reinserts entries mid-update, so the copy is taken under _transports_lock.
+        std::vector<class Transport*> GetTransports() const
+        {
+            std::shared_lock<std::shared_mutex> lock(_transports_lock);
+            return std::vector<Transport*>(_transports.begin(), _transports.end());
+        }
 
         // can't be nullptr for loaded map
         MapPersistentState* GetPersistentState() const { return m_persistentState; }
@@ -742,6 +750,11 @@ class Map : public GridRefManager<NGridType>
 
         // Objects that must update even in inactive grids without activating them
         typedef std::set<Transport*> TransportsContainer;
+        // Guards the structure of _transports only. Readers on other maps' threads (GetTransports)
+        // take it shared; Map::Add/Remove<Transport> take it exclusively around the insert/erase.
+        // Held for the insert/erase alone, never across a Remove call, so the UnloadAll and update
+        // walks that call Remove while iterating cannot self-deadlock on this non-recursive mutex.
+        mutable std::shared_mutex _transports_lock;
         TransportsContainer _transports;
         bool m_unloading = false;
         bool m_crashed = false;

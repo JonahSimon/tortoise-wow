@@ -564,14 +564,22 @@ bool WorldPosition::HasFaction(const Team team) const
 std::set<GenericTransport*> WorldPosition::getTransports(uint32 entry)
 {
     std::set<GenericTransport*> transports;
-    for (auto transport : getMap(getFirstInstanceId())->GetTransports()) //Boats&Zeppelins.
+
+    // getFirstInstanceId() falls back to 0 and FindMap misses for an instanciated or unloaded
+    // continent, so this is routinely null for the very cross-map dock queries bots make.
+    // Both lookups below dereference it, so bail out rather than read through null.
+    Map* map = getMap(getFirstInstanceId());
+    if (!map)
+        return transports;
+
+    for (auto transport : map->GetTransports()) //Boats&Zeppelins.
         if (!entry || transport->GetEntry() == entry)
             transports.insert(transport);
 
     if (transports.empty() || !entry) //Elevators&rams
     {
         for (auto gopair : getGameObjectsNear(0.0f, entry))
-            if (GameObject* go = getMap(getFirstInstanceId())->GetGameObject(gopair->first))
+            if (GameObject* go = map->GetGameObject(gopair->first))
                 if (GenericTransport* transport = dynamic_cast<GenericTransport*>(go))
                     transports.insert(transport);
     }
