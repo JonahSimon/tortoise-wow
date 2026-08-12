@@ -165,6 +165,9 @@ float TravelNodePath::getCost(Unit* unit, uint32 cGold)
                 if (!bot->isTaxiCheater() && taxiPath->price > cGold)
                     return -1;
 
+                // Only the destination has to be known up front: MovementAction::UseTaxi learns
+                // the source node on arrival (from the flight master when one is in range, by
+                // hand otherwise), the same way a player does by walking up to it.
                 if (!bot->isTaxiCheater() && !bot->m_taxi.IsTaximaskNodeKnown(taxiPath->to))
                     return -1;
 
