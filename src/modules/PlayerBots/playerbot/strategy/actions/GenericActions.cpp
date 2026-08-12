@@ -1,6 +1,7 @@
 
 #include "playerbot/playerbot.h"
 #include "GenericActions.h"
+#include <map>
 #include "playerbot/PlayerbotFactory.h"
 
 using namespace ai;
@@ -18,21 +19,32 @@ bool UpdateStrategyDependenciesAction::Execute(Event& event)
 {
     if (!strategiesToAdd.empty() || !strategiesToRemove.empty())
     {
-        // Strategies to add
+        // One list per bot state instead of one call per strategy. Every call
+        // ends in a full rebuild of that engine's triggers, and the rebuild
+        // only has to happen once the whole set is in place. Additions stay
+        // ahead of removals, as before.
+        std::map<BotState, std::string> changesPerState;
+
         for (const StrategyToUpdate* strategy : strategiesToAdd)
         {
-            std::stringstream changeStr;
-            changeStr << "+" << strategy->name;
-            ai->ChangeStrategy(changeStr.str(), strategy->state);
+            std::string& line = changesPerState[strategy->state];
+            if (!line.empty())
+                line += ",";
+
+            line += "+" + strategy->name;
         }
 
-        // Strategies to remove
         for (const StrategyToUpdate* strategy : strategiesToRemove)
         {
-            std::stringstream changeStr;
-            changeStr << "-" << strategy->name;
-            ai->ChangeStrategy(changeStr.str(), strategy->state);
+            std::string& line = changesPerState[strategy->state];
+            if (!line.empty())
+                line += ",";
+
+            line += "-" + strategy->name;
         }
+
+        for (std::map<BotState, std::string>::const_iterator i = changesPerState.begin(); i != changesPerState.end(); ++i)
+            ai->ChangeStrategy(i->second, i->first);
 
         return true;
     }

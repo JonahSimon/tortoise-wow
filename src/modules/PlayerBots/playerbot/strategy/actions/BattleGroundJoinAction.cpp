@@ -39,6 +39,75 @@
 using namespace ai;
 
 
+
+namespace
+{
+    // Shared by both join paths on purpose. BGJoinAction and FreeBGJoinAction carry
+    // near-identical copies of this decision, and the first attempt at this limit
+    // went into one of them only - the free bots, which are the entire population on
+    // an idle realm, went through the other and multiplied as before.
+    // Counting who is queuing is not the same as counting matches. The moment a
+    // match starts its players leave the queue, the count falls back to zero and
+    // the next wave queues up behind it - which is how three Warsong instances
+    // formed while a queue limit was supposedly in place. Count the matches.
+    uint32 CountRunningBattlegrounds(BattleGroundTypeId bgTypeId, BattleGroundBracketId bracketId)
+    {
+        uint32 running = 0;
+        for (auto it = sBattleGroundMgr.GetBattleGroundsBegin(bgTypeId);
+             it != sBattleGroundMgr.GetBattleGroundsEnd(bgTypeId); ++it)
+        {
+            BattleGround* bg = it->second;
+
+            // Templates live in their own container, but guard anyway - a
+            // template has no map and therefore no instance id.
+            if (!bg || !bg->GetInstanceID())
+                continue;
+
+            if (bg->GetBracketId() != bracketId)
+                continue;
+
+            // One that is already handing out its rewards is not competition.
+            if (bg->GetStatus() == STATUS_WAIT_LEAVE)
+                continue;
+
+            ++running;
+        }
+
+        return running;
+    }
+
+    bool BotBattlegroundLimitReached(uint32 bgTypeId, uint32 bracketId, bool isArena, bool hasPlayers,
+                                     uint32 bgCount, uint32 bracketSize, uint32 teamCount)
+    {
+        // Arenas are limited by instance count alone: their team slots are indexed by
+        // rating rather than faction, so a per-team number would not mean the same thing.
+        const int32 cap = isArena ? -1 : sPlayerbotAIConfig.GetBgBotTeamCap(bgTypeId);
+
+        // Zero switches a battleground off for bots outright, whether or not anyone
+        // real is queuing. Sunnyglade Valley is disabled from client patch 1.18.1
+        // onwards while its template is still in the world database.
+        if (cap == 0)
+            return true;
+
+        if (hasPlayers)
+            return false;
+
+        // Nobody real is waiting for this bracket, so one match of it is enough.
+        if (CountRunningBattlegrounds((BattleGroundTypeId)bgTypeId, (BattleGroundBracketId)bracketId) >= 1)
+            return true;
+
+        // And do not let a second one fill up behind the first while it is still
+        // forming - at that point it has no instance yet and the counter above
+        // cannot see it.
+        if (bgCount >= bracketSize)
+            return true;
+
+        // Hold the bot side below the template maximum, so a player who queues while
+        // this is running finds a free slot in it instead of starting a second one.
+        return cap > 0 && (int32)teamCount >= cap;
+    }
+}
+
 bool BGJoinAction::Execute(Event& event)
 {
     uint32 queueType = AI_VALUE(uint32, "bg type");
@@ -427,11 +496,9 @@ bool BGJoinAction::shouldJoinBg(BattleGroundQueueTypeId queueTypeId, BattleGroun
 
     uint32 TeamId = bot->GetTeam() == ALLIANCE ? 0 : 1;
 
-    //if (!hasPlayers && !isArena)
-    //{
-    //    if (BgCount >= bg->GetMaxPlayers())
-    //        return false;
-    //}
+    if (BotBattlegroundLimitReached(bgTypeId, bracketId, isArena, hasPlayers, BgCount, BracketSize,
+                                    TeamId == 0 ? ACount : HCount))
+        return false;
 
 #ifndef MANGOSBOT_ZERO
     if (isArena)
@@ -928,6 +995,10 @@ bool FreeBGJoinAction::shouldJoinBg(BattleGroundQueueTypeId queueTypeId, BattleG
     uint32 RCount = 0;
 
     uint32 TeamId = bot->GetTeam() == ALLIANCE ? 0 : 1;
+
+    if (BotBattlegroundLimitReached(bgTypeId, bracketId, isArena, hasPlayers, BgCount, BracketSize,
+                                    TeamId == 0 ? ACount : HCount))
+        return false;
 
 #ifndef MANGOSBOT_ZERO
     if (isArena)

@@ -147,6 +147,7 @@ namespace ai
             creators["attack enemy player"] = [](PlayerbotAI* ai) { return new AttackEnemyPlayerAction(ai); };
             creators["pull my target"] = [](PlayerbotAI* ai) { return new PullMyTargetAction(ai); };
             creators["pull rti target"] = [](PlayerbotAI* ai) { return new PullRTITargetAction(ai); };
+            creators["pull nearest target"] = [](PlayerbotAI* ai) { return new PullNearestTargetAction(ai); };
             creators["pull start"] = [](PlayerbotAI* ai) { return new PullStartAction(ai); };
             creators["pull action"] = [](PlayerbotAI* ai) { return new PullAction(ai); };
             creators["return to pull position"] = [](PlayerbotAI* ai) { return new ReturnToPullPositionAction(ai); };

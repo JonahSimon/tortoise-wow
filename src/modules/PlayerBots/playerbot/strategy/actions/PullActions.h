@@ -32,6 +32,23 @@ namespace ai
         Unit* GetTarget(Event& event) override;
     };
 
+    // Picks its own target instead of being handed one by a chat command, so a
+    // tank can start a fight nobody asked it to start. Everything after the
+    // target choice is the existing pull path.
+    class PullNearestTargetAction : public PullRequestAction
+    {
+    public:
+        PullNearestTargetAction(PlayerbotAI* ai) : PullRequestAction(ai, "pull nearest target") {}
+
+        // Shared with ShouldPullTrigger: asking "is there anything to pull" and
+        // "what do we pull" with two different pieces of code is how they drift
+        // apart.
+        static Unit* FindPullTarget(PlayerbotAI* ai);
+
+    private:
+        Unit* GetTarget(Event& event) override;
+    };
+
     class PullStartAction : public Action
     {
     public:

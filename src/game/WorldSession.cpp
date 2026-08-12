@@ -101,6 +101,14 @@ WorldSession::WorldSession(uint32 id, WorldSocket *sock, AccountTypes sec, time_
     else
         m_Address = "<BOT>";
 
+    // Start every session with the null implementation so that m_antiCheat is
+    // never a null pointer. InitAntiCheatSession swaps in the real one during
+    // a network login; bot sessions never pass through WorldSocket and so had
+    // nothing at all. Several handlers dereference it without checking -
+    // HandleMoveKnockBackAck among them, which the playerbot module calls
+    // directly, so a knocked-back bot would take the server down.
+    m_antiCheat = std::make_unique<NullSessionAnticheat>(this);
+
     m_lastUpdateTime = WorldTimer::getMSTime();
     _analyser = std::make_unique<AccountAnalyser>(this);
 }

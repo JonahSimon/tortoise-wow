@@ -1,5 +1,6 @@
 
 #include "playerbot/playerbot.h"
+#include <memory>
 #include "StatsValues.h"
 
 #include "playerbot/ServerFacade.h"
@@ -35,10 +36,8 @@ bool PetIsDeadValue::Calculate()
     {
         uint32 ownerid = bot->GetGUIDLow();
         auto result = CharacterDatabase.PQuery("SELECT id FROM character_pet WHERE owner = '%u'", ownerid);
-        if (!result)
-            return false;
-
-        return true;
+        std::unique_ptr<QueryResult> result_guard(result);
+        return result != nullptr;
     }
     if (bot->GetPetGuid() && !bot->GetPet())
         return true;

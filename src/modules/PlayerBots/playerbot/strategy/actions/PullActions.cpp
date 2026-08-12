@@ -7,6 +7,48 @@
 
 using namespace ai;
 
+Unit* PullNearestTargetAction::FindPullTarget(PlayerbotAI* ai)
+{
+    Player* bot = ai->GetBot();
+    Unit* best = nullptr;
+
+    // Same ceiling PullRequestAction::Execute enforces, so the trigger cannot
+    // offer a target the action will then refuse.
+    float bestDistance = sPlayerbotAIConfig.reactDistance * 3;
+
+    for (const ObjectGuid& guid : ai->GetAiObjectContext()->GetValue<std::list<ObjectGuid>>("possible targets")->Get())
+    {
+        Unit* unit = ai->GetUnit(guid);
+        if (!unit || !unit->IsAlive())
+            continue;
+
+        // "possible targets" carries neutrals too, and a neutral is not a pull.
+        if (!bot->IsHostileTo(unit))
+            continue;
+
+        // Somebody is already on it - that is no longer a pull, it is a join.
+        if (unit->IsInCombat())
+            continue;
+
+        if (!AttackersValue::IsValid(unit, bot, nullptr, false))
+            continue;
+
+        const float distance = unit->GetDistance(bot);
+        if (distance < bestDistance)
+        {
+            bestDistance = distance;
+            best = unit;
+        }
+    }
+
+    return best;
+}
+
+Unit* PullNearestTargetAction::GetTarget(Event& event)
+{
+    return FindPullTarget(ai);
+}
+
 bool PullRequestAction::Execute(Event& event)
 {
     PullStrategy* strategy = PullStrategy::Get(ai);

@@ -507,7 +507,16 @@ bool QuestStageActiveValue::Calculate()
             return false;
         break;
     case TravelDestinationPurpose::QuestTaker:
-        if (!bot->CanCompleteQuest(questId))
+        // CanCompleteQuest answers "could this quest still flip to complete", and
+        // the core returns false the moment it has - "not allow re-complete quest".
+        // Asking it here threw away exactly the quests that were ready to hand in,
+        // leaving only the brief window where the objectives are met but the status
+        // has not been updated yet. Bots that missed that window carried the quest
+        // forever: ten characters followed from level 1 accumulated 25 completed
+        // quests between them without a single QuestTravelToTaker event.
+        if (bot->GetQuestRewardStatus(questId))
+            return false;
+        if (bot->GetQuestStatus(questId) != QUEST_STATUS_COMPLETE && !bot->CanCompleteQuest(questId))
             return false;
         break;
     case TravelDestinationPurpose::QuestObjective1:

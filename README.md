@@ -39,6 +39,11 @@ Fixes made while running them:
 | Talent specs | Premade specs generated for the talent rate the config actually ships — the stock vanilla links are all rejected by Turtle's reworked trees |
 | Target values | Cached a raw `Unit*` for up to a second. If the creature died inside that window the next read followed a freed pointer — crash in `AttackAction::IsTargetValid`. The guid is carried alongside now and cached reads resolve through the object accessor |
 | Battleground queue | `BattleGroundQueue` declares a `recursive_mutex`, but all five acquisitions were left commented out during the ACE migration. A thousand bots queueing from parallel map threads tore the `std::map` apart. Restored |
+| Anticheat on bot sessions | `m_antiCheat` is only assigned during a network login, so bot sessions carried a null pointer for life — and seven call sites in `MovementHandler` dereference it unchecked, one of which the bot module calls directly. Every session now starts with the `NullSessionAnticheat` the core already ships |
+| Dungeon fill | A role that cannot be filled is counted as covered, but the queue count does not follow — so with no tank available the group stopped at four and could never form, the matcher wanting exactly one tank, one healer and three damage. The player waited without being told anything. The level window is asymmetric now (a bot above the waiting player still works, one below misses and dies), a tank can be taken out of a bot-only run, and an unfilled role is logged |
+| Spec selection | Warriors come out 125 fury against 35 protection where the configured weights say 50:50 — and on a bot realm the protection warriors are the tank supply. Fixed on the way: an off-by-one that gave the first path an extra slot, a talent tree called from nowhere that read a config field nothing fills, and a role switch whose result was computed and discarded. The remaining skew is logged rather than guessed at |
+| Strategy rebuilds | `Engine::Init()` discards and rebuilds every strategy's triggers, and it ran once per strategy in a list rather than once per change — 105 million trigger initialisations an hour, near 29,000 a second, inside 4.4 billion allocations. One flag was passed the wrong way round: `initMode` means "hold back", the parameter it was handed means "do it now" |
+| Custom strategies | `+custom::learned` is in the default strategy list, so every bot asked the database twice on every rebuild for action lines that ten characters out of a thousand actually have. The cache meant to prevent that is written by no code path in the tree. Results are remembered now, the empty ones included |
 | Stability | The bot logger passed finished text to `vfprintf` as a format string; any bot name containing `%` aborted the server on MSVC |
 
 ### Server features
@@ -51,7 +56,7 @@ All off by default, all in `mangosd.conf`:
 | Hourly donation points | `AutoDonationPoints.*` | `sql/logon/donation_point_progress.sql` on the **login** database |
 | Beginners guild for new characters | `BeginnersGuilds`, `BeginnersGuildHorde/Alliance` | the guilds must exist; the shipped ids are placeholders |
 | Guild bank in every capital | `GuildBank.NpcEntriesAlliance/Horde` | nothing — the gossip trigger ships as a migration |
-| Dungeon finder fills with bots | `LFT.BotFill.Enable`, `.DelaySeconds`, `.LevelRange` | – |
+| Dungeon finder fills with bots | `LFT.BotFill.Enable`, `.DelaySeconds`, `.LevelRangeBelow/Above`, `.SeedRuns`, `.SeedDungeons`, `.SeedTeleport` | – |
 | Solo dungeon resurrection, leech limits | `SoloDungeonRepopAlive.Enable`, `Leech.*` | – |
 | Keep navmesh tiles loaded | `MMapTileUnload` | off by default; `removeTile` zeroes `tile->polys` and Detour reads it unvalidated, so a surviving polyRef resolves to `nullptr + index` |
 
@@ -72,6 +77,7 @@ will not contain them — regenerate it or copy the blocks across.
 | Disenchanting | Restored the disenchant ids this database had lost, plus 3450 items that never had one |
 | Mage talents | A wide pass over 21 talents and spells — Ignite, Combustion, Amplify/Dampen Magic, Improved Blizzard, Arcane Meditation, Master of Elements, Magic Absorption, Arctic Reach, Hot Streak, Icicles and more. Taken from [faemwow/tortoise-wow](https://github.com/faemwow/tortoise-wow) |
 | Mana gain modifiers | `SPELL_AURA_MOD_MANA_GAIN_PERCENT` was never applied when a spell restored mana, so the modifier did nothing for any class. Now applied to both the amount and the threat it generates |
+| Damage on creatures | `Unit::DealDamage` branched on `!IsPlayer() && addThreat`, so a creature taking damage that carries no threat fell into the player-only half and was cast to `Player*` — durability loss on a creature, and an uncaught exception |
 | Shatter | Read its crit bonus from five hardcoded per-rank values instead of the spell modifier |
 | Healing Touch | `OnFinish` followed `mod->ownerAura`, a raw pointer captured when the modifier was applied. An aura expiring mid-cast left it dangling; `SpellModifier::spellId` carries the same id and is used instead |
 | Guild bank | Money column was signed and parsing unchecked — deposits could overflow into a negative balance |
@@ -107,9 +113,9 @@ Two are deliberately manual, in `sql/tools/`, because both depend on per-server 
   the migrations under `sql/database_updates`. Only client data (maps, DBC, vmaps, mmaps)
   has to be extracted from a game client, with the tools under `tools/`
 
-Several fixes are maintained separately as standalone patches at
-**[Shyalya/turtle-1.18-server-features](https://github.com/Shyalya/turtle-1.18-server-features)**
-so they can be applied to any compatible tree.
+Several of the fixes below are also kept as standalone patches, each one
+self-contained, so they can be lifted onto any compatible tree without taking
+the rest of this fork with them. Ask if you want one.
 
 Work from other forks is pulled in where it fits and credited in the commit —
 the mage pass comes from [faemwow/tortoise-wow](https://github.com/faemwow/tortoise-wow),
@@ -187,8 +193,7 @@ This will be streamlined once the core is more up to date
 **For this fork:** improvements to the core itself are best directed at
 [upstream](https://github.com/Penqle/tortoise-wow) rather than here — this fork
 exists to run a private server and only tracks upstream plus the additions
-listed at the top. The standalone server features live in their own repo:
-[Shyalya/turtle-1.18-server-features](https://github.com/Shyalya/turtle-1.18-server-features).
+listed at the top.
 
 Upstream's note follows:
 
@@ -214,5 +219,4 @@ Upstream's note follows:
 [15]: http://windows.microsoft.com/ "Microsoft Windows"
 [19]: https://github.com/ElunaLuaEngine/Eluna
 [20]: https://github.com/ike3/mangosbot-bots
-[22]: https://github.com/Shyalya/turtle-1.18-server-features
 [21]: http://github.com/memononen/recastnavigation "Recast - Navigation-mesh Toolset for Games"

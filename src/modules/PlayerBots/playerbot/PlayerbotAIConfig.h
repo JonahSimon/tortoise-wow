@@ -195,14 +195,13 @@ public:
     std::string randomBotCombatStrategies, randomBotNonCombatStrategies, randomBotReactStrategies, randomBotDeadStrategies;
     uint32 randomBotMinLevel, randomBotMaxLevel;
     float randomChangeMultiplier;
-    uint32 specProbability[MAX_CLASSES][10];
     std::string premadeLevelSpec[MAX_CLASSES][10][91]; //lvl 10 - 100
     uint32 classRaceProbabilityTotal;
     uint32 classRaceProbability[MAX_CLASSES][MAX_RACES];
     bool useFixedClassRaceCounts;
     using ClassRacePair = std::pair<uint8, uint8>;
     std::map<ClassRacePair, uint32> fixedClassRaceCounts;
-    uint32 levelProbability[DEFAULT_MAX_LEVEL + 1];
+    uint32 levelProbability[PLAYER_STRONG_MAX_LEVEL + 1];   // see levelBucket in PlayerbotLoginMgr.h
     ClassSpecs classSpecs[MAX_CLASSES];
     GlyphPrioritySpecMap glyphPriorityMap[MAX_CLASSES];
     bool gearProgressionSystemEnabled;
@@ -210,6 +209,24 @@ public:
     int32 gearProgressionSystemItems[MAX_GEAR_PROGRESSION_LEVEL][MAX_CLASSES][4][SLOT_EMPTY];
     std::string commandPrefix, commandSeparator;
     std::string randomBotAccountPrefix;
+    // Character names that stay online and are never teleported away.
+    // Resolved to guids by RandomPlayerbotMgr, which has the database.
+    std::list<std::string> pinnedBotNames;
+
+    // Bots per team a battleground may fill while no real player is queuing for
+    // that bracket, keyed by BattleGroundTypeId. Deliberately below the
+    // template maximum so a player who queues later drops into the running
+    // match rather than starting a second one. Empty means no cap.
+    std::map<uint32, uint32> bgBotTeamCap;
+
+    // -1 when the type is not listed at all, otherwise the configured number.
+    // Zero is meaningful: it switches the battleground off for bots entirely,
+    // which is what a map disabled by the client patch needs.
+    int32 GetBgBotTeamCap(uint32 bgTypeId) const
+    {
+        auto it = bgBotTeamCap.find(bgTypeId);
+        return it == bgBotTeamCap.end() ? -1 : (int32)it->second;
+    }
     uint32 randomBotAccountCount;
     bool deleteRandomBotAccounts;
     uint32 randomBotGuildCount;

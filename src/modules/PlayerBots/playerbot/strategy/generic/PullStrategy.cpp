@@ -154,6 +154,14 @@ void PullStrategy::InitCombatTriggers(std::list<TriggerNode*>& triggers)
 void PullStrategy::InitNonCombatTriggers(std::list<TriggerNode*>& triggers)
 {
     InitCombatTriggers(triggers);
+
+    // ShouldPullTrigger is restrictive enough - dungeon, tank, grouped, nobody
+    // fighting, healer with mana, a reachable target - that it can afford a high
+    // relevance. Without one it loses to whatever the bot does while idle, which
+    // is the behaviour this is meant to replace.
+    triggers.push_back(new TriggerNode(
+        "should pull",
+        NextAction::array(0, new NextAction("pull nearest target", ACTION_HIGH), NULL)));
 }
 
 void PullStrategy::InitCombatMultipliers(std::list<Multiplier*>& multipliers)

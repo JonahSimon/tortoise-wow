@@ -89,6 +89,7 @@ namespace ai
             creators["death"] = [](PlayerbotAI* ai) { return new DeathTrigger(ai); };
             creators["resurrect"] = [](PlayerbotAI* ai) { return new ResurrectTrigger(ai); };
 
+            creators["should pull"] = [](PlayerbotAI* ai) { return new ShouldPullTrigger(ai); };
             creators["pull start"] = [](PlayerbotAI* ai) { return new PullStartTrigger(ai); };
             creators["pull end"] = [](PlayerbotAI* ai) { return new PullEndTrigger(ai); };
 

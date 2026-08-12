@@ -2520,33 +2520,11 @@ bool PlayerbotFactory::SelectPremadeSpecNo()
         }
     }
 
+    sLog.outBasic("SPECROLL: factory picked %s for class %u (%u paths, weight %u)",
+        chosen->name.c_str(), uint32(cls), uint32(paths.size()), totalProbability);
+
     sRandomPlayerbotMgr.SetValue(bot, "specNo", chosen->id + 1);
     return true;
-}
-
-void PlayerbotFactory::InitTalentsTree(bool incremental)
-{
-    uint32 specNo = sRandomPlayerbotMgr.GetValue(bot->GetGUIDLow(), "specNo");
-    if (incremental && specNo)
-	{
-        specNo -= 1;
-	}
-    else
-    {
-        uint32 point = urand(0, 100);
-        uint8 cls = bot->getClass();
-        uint32 p1 = sPlayerbotAIConfig.specProbability[cls][0];
-        uint32 p2 = p1 + sPlayerbotAIConfig.specProbability[cls][1];
-
-        specNo = (point < p1 ? 0 : (point < p2 ? 1 : 2));
-        sRandomPlayerbotMgr.SetValue(bot, "specNo", specNo + 1);
-    }
-
-    InitTalents(specNo);
-
-    if (bot->GetFreeTalentPoints()) {
-        InitTalents(2 - specNo);
-    }
 }
 
 class DestroyItemsVisitor : public IterateItemsVisitor
@@ -4438,58 +4416,6 @@ void PlayerbotFactory::InitSpecialSpells()
     }
 }
 
-void PlayerbotFactory::InitTalents(uint32 specNo)
-{
-    uint32 classMask = bot->getClassMask();
-
-    std::map<uint32, std::vector<TalentEntry const*> > spells;
-    for (uint32 i = 0; i < sTalentStore.GetNumRows(); ++i)
-    {
-        TalentEntry const *talentInfo = sTalentStore.LookupEntry(i);
-        if(!talentInfo)
-            continue;
-
-        TalentTabEntry const *talentTabInfo = sTalentTabStore.LookupEntry( talentInfo->TalentTab );
-        if(!talentTabInfo || talentTabInfo->tabpage != specNo)
-            continue;
-
-        if( (classMask & talentTabInfo->ClassMask) == 0 )
-            continue;
-
-        spells[talentInfo->Row].push_back(talentInfo);
-    }
-
-    uint32 freePoints = bot->GetFreeTalentPoints();
-    for (std::map<uint32, std::vector<TalentEntry const*> >::iterator i = spells.begin(); i != spells.end(); ++i)
-    {
-        std::vector<TalentEntry const*> &spells = i->second;
-        if (spells.empty())
-        {
-            sLog.outError("%s: No spells for talent row %d", bot->GetName(), i->first);
-            continue;
-        }
-
-        int attemptCount = 0;
-        while (!spells.empty() && (int)freePoints - (int)bot->GetFreeTalentPoints() < 5 && attemptCount++ < 3 && bot->GetFreeTalentPoints())
-        {
-            int index = urand(0, spells.size() - 1);
-            TalentEntry const *talentInfo = spells[index];
-            for (int rank = 0; rank < MAX_TALENT_RANK && bot->GetFreeTalentPoints(); ++rank)
-            {
-                uint32 spellId = talentInfo->RankID[rank];
-                if (!spellId)
-                    continue;
-
-                bot->learnSpell(spellId, false);
-                bot->UpdateFreeTalentPoints(false);
-            }
-            spells.erase(spells.begin() + index);
-        }
-
-        freePoints = bot->GetFreeTalentPoints();
-    }
-}
-
 ObjectGuid PlayerbotFactory::GetRandomBot()
 {
     std::vector<ObjectGuid> guids;
@@ -4729,6 +4655,32 @@ void PlayerbotFactory::InitMounts()
         slow = { 8395, 10796, 10799 };
         fast = { 23241, 23242, 23243 };
         break;
+    default:
+        // Turtle carries races this switch never knew - Goblin (9) and High
+        // Elf (10) - and on a vanilla build the Draenei and Blood Elf cases
+        // below are preprocessed away as well. Any race that falls through
+        // leaves every list empty, and the draw further down then reads past
+        // the end of an empty vector, because size() - 1 on an unsigned type
+        // is not -1 but the largest value there is. What comes back is either
+        // a spell id out of thin air - which learnSpell duly reports as not
+        // existing - or a segfault.
+        //
+        // Their own mounts cannot be named here: Turtle gives nearly every
+        // mount item the same generic spell and restricts it by faction mask
+        // instead, so there is no per-race spell to list. The faction's
+        // ordinary mounts are the honest fallback. Not lore, but a bot that
+        // rides rather than walks to sixty.
+        if (bot->GetTeam() == ALLIANCE)
+        {
+            slow = { 470, 6648, 458, 472 };
+            fast = { 23228, 23227, 23229 };
+        }
+        else
+        {
+            slow = { 6654, 6653, 580 };
+            fast = { 23250, 23252, 23251 };
+        }
+        break;
 #ifndef MANGOSBOT_ZERO
     case RACE_DRAENEI:
         slow = { 34406, 35711, 35710 };
@@ -4768,8 +4720,15 @@ void PlayerbotFactory::InitMounts()
         if (bot->GetLevel() < fourthmount && type == 3)
             continue;
 
-        uint32 index = urand(0, mounts[bot->getRace()][type].size() - 1);
-        uint32 spell = mounts[bot->getRace()][type][index];
+        // Second lock on the same door: the default case above should leave
+        // no list empty, but a future race, or flying mounts on a build whose
+        // level thresholds are reachable, must not turn an empty list into an
+        // out-of-bounds read.
+        std::vector<uint32> const& available = mounts[bot->getRace()][type];
+        if (available.empty())
+            continue;
+
+        uint32 spell = available[urand(0, available.size() - 1)];
         if (spell)
         {
             bot->learnSpell(spell, false);

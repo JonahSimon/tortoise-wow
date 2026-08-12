@@ -1,5 +1,6 @@
 
 #include "Category.h"
+#include <memory>
 #include "ItemBag.h"
 #include "ahbot/AhBot.h"
 #include "World.h"
@@ -563,6 +564,7 @@ uint32 AhBot::GetTime(std::string category, uint32 id, uint32 auctionHouse, uint
 {
     auto results = CharacterDatabase.PQuery("SELECT MAX(buytime) FROM ahbot_history WHERE item = '%u' AND won = '%u' AND auction_house = '%u' AND category = '%s'",
         id, type, factions[auctionHouse], category.c_str());
+    std::unique_ptr<QueryResult> results_guard(results);
 
     if (!results)
         return 0;
@@ -964,6 +966,7 @@ uint32 AhBot::GetAnswerCount(uint32 itemId, uint32 auctionHouse, uint32 withinTi
     auto results = CharacterDatabase.PQuery("SELECT COUNT(*) FROM ahbot_history WHERE "
         "item = '%u' AND won in (2, 3) AND auction_house = '%u' AND buytime > '%lu'",
         itemId, factions[auctionHouse], time(0) - withinTime);
+    std::unique_ptr<QueryResult> results_guard(results);
     if (results)
     {
         do
@@ -994,6 +997,7 @@ uint32 AhBot::GetAvailableMoney(uint32 auctionHouse)
     auto results = CharacterDatabase.PQuery(
         "SELECT won, SUM(bid) FROM ahbot_history WHERE auction_house = '%u' GROUP BY won HAVING won > 0 ORDER BY won",
         factions[auctionHouse]);
+    std::unique_ptr<QueryResult> results_guard(results);
     if (results)
     {
         do
@@ -1007,6 +1011,7 @@ uint32 AhBot::GetAvailableMoney(uint32 auctionHouse)
     results = CharacterDatabase.PQuery(
         "SELECT max(buytime) FROM ahbot_history WHERE auction_house = '%u' AND won = '2'",
         factions[auctionHouse]);
+    results_guard.reset(results);
     if (results)
     {
         Field* fields = results->Fetch();
@@ -1033,6 +1038,7 @@ uint32 AhBot::GetAvailableMoney(uint32 auctionHouse)
 void AhBot::CheckCategoryMultipliers()
 {
     auto results = CharacterDatabase.PQuery("SELECT category, multiplier, max_auction_count, expire_time FROM ahbot_category");
+    std::unique_ptr<QueryResult> results_guard(results);
     if (results)
     {
         do
@@ -1083,6 +1089,7 @@ void AhBot::updateMarketPrice(uint32 itemId, double price, uint32 auctionHouse)
     double marketPrice = 0;
 
     auto results = CharacterDatabase.PQuery("SELECT price FROM ahbot_price WHERE item = '%u' AND auction_house = '%u'", itemId, auctionHouse);
+    std::unique_ptr<QueryResult> results_guard(results);
     if (results)
     {
         marketPrice = results->Fetch()[0].GetFloat();
@@ -1147,6 +1154,7 @@ void AhBot::LoadRandomBots()
             continue;
 
         auto result = CharacterDatabase.PQuery("SELECT guid, race FROM characters WHERE account = '%u'", accountId);
+        std::unique_ptr<QueryResult> result_guard(result);
         if (!result)
             continue;
 
@@ -1364,6 +1372,7 @@ void AhBot::CleanupPropositions()
 {
     uint32 deliverTime = time(0) - 3600 * 24 * 2;
     auto result = CharacterDatabase.PQuery("select id, receiver from mail where subject like 'AH Proposition%%' and deliver_time <= '%u'", deliverTime);
+    std::unique_ptr<QueryResult> result_guard(result);
     if (!result)
         return;
 

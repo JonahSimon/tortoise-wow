@@ -251,11 +251,23 @@ AiPlayerbot.InviteChat = 1
 
 # Redirect all bot subsystem log output to a dedicated file so the main
 # server.log stays clean. Path is relative to the server's LogsDir setting.
-# Set to empty string to disable redirection (output goes to server.log).
-AiPlayerbot.BotLogFile = bots.log
+#
+# Off by default, and that is deliberate. With a file set, BotLog writes and
+# flushes every line it is handed, and BotLog::outDetail has no level gate at
+# all - unlike outDebug, which honours BotLogDebug below. BotLog also reports
+# HasLogLevelOrHigher() as always true, so level checks in bot code do not
+# apply either. On a busy server the file reaches tens of gigabytes overnight;
+# the loudest single writer is ahbot/ItemBag.cpp, one line per item that fits
+# no category, on every auction house pass.
+#
+# Left empty, bot output falls through to the core logger, where LogFileLevel
+# applies and DETAIL is dropped at level 1. Set a filename only while actually
+# diagnosing something, and watch its size.
+AiPlayerbot.BotLogFile =
 
-# Write DEBUG-level messages to bots.log. Disabled by default so only
-# outString/outInfo/outDetail/outError/outBasic/outErrorDb are logged.
+# Write DEBUG-level messages to the bot log. Disabled by default. Note that
+# this gate only covers outDebug; outString, outInfo, outDetail, outError,
+# outBasic and outErrorDb are written regardless whenever BotLogFile is set.
 # AiPlayerbot.BotLogDebug = 0
 
 # The summon command can be used without restriction by non-gms.
@@ -1008,7 +1020,7 @@ AiPlayerbot.RandomBotNonCombatStrategies = +grind,+loot,+custom::say,+tfish,+wan
 #AiPlayerbot.RandomBotReactStrategies =
 #AiPlayerbot.RandomBotDeadStrategies =
 AiPlayerbot.CombatStrategies = +custom::say,+dps,+dps assist,-threat
-AiPlayerbot.NonCombatStrategies = +grind,+loot,+custom::say,+return,+delayed roll,+tfish,+wander,+rpg craft
+AiPlayerbot.NonCombatStrategies = +grind,+loot,+custom::say,+return,+delayed roll,+tfish,+wander,+rpg craft,+quest
 #AiPlayerbot.ReactStrategies = 
 #AiPlayerbot.DeadStrategies = 
 

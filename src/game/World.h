@@ -427,7 +427,9 @@ enum eConfigUInt32Values
     CONFIG_UINT32_MAX_ITEM_STACK_TRANSFERRED,
     CONFIG_UINT32_DYNAMIC_SCALING_POP,
     CONFIG_UINT32_LFT_BOTFILL_DELAY,
-    CONFIG_UINT32_LFT_BOTFILL_LEVEL_RANGE,
+    CONFIG_UINT32_LFT_BOTFILL_LEVEL_BELOW,
+    CONFIG_UINT32_LFT_BOTFILL_LEVEL_BELOW_HEALER,
+    CONFIG_UINT32_LFT_BOTFILL_LEVEL_ABOVE,
     CONFIG_UINT32_VALUE_COUNT
 };
 
@@ -1363,15 +1365,15 @@ class World
         void UpdateWorldBuffTimer(uint32 diff, WorldBuffTimerState& state, uint32 spellId,
             std::string const& announceLabel, std::function<bool(Player*)> const& eligible);
 
-        // custom: AutoDonationPoints (2026-07-27) - pro Account akkumulierte
-        // Online-Zeit in ms seit der letzten Gutschrift, damit unterschiedliche
-        // Login-Zeitpunkte nicht auf einen gemeinsamen Takt synchronisiert
-        // werden muessen (jeder Account bekommt seine eigene volle Stunde).
+        // custom: AutoDonationPoints - time online in ms per account since the
+        // last award, so that different login times need not be synchronised
+        // onto one common tick: every account gets its own full hour.
+        //
         std::unordered_map<uint32 /*accountId*/, uint32 /*accumulatedMs*/> m_donationPointAccumulatorMs;
-        // Time until the next periodic persist of the above
-        // Akkumulatoren nach `donation_point_progress` (Login-DB) - siehe
-        // World.cpp. Ohne Persistenz fing der Fortschritt nach jedem Neustart
-        // wieder bei 0 an.
+        // Time until the next periodic persist of the accumulators above into
+        // `donation_point_progress` in the login database - see World.cpp.
+        // Without persistence the progress restarted from zero after every
+        // server restart.
         uint32 m_donationPointFlushTimer = 0;
 
         uint32 m_minChatLevel = 0;

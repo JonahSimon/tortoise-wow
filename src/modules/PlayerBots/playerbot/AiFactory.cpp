@@ -278,55 +278,14 @@ BotRoles AiFactory::GetPlayerRoles(uint8 cls, uint8 tab)
 
 BotRoles AiFactory::GetPlayerRoles(const Player* player)
 {
-    uint8 cls = player->getClass();
-    uint8 tab = GetPlayerSpecTab(player);
-
-    BotRoles role = BOT_ROLE_NONE;
-    switch (cls)
-    {
-        case CLASS_WARRIOR: {
-            if (tab == 2 || player->HasAura(71)) // Defensive stance
-            {
-                role = BOT_ROLE_TANK;
-            }
-            break;
-        }
-
-        case CLASS_PALADIN: {
-            if (tab == 1 || player->HasAura(25780)) // Righteous fury
-            {
-                role = BOT_ROLE_TANK;
-            }
-
-            break;
-        }
-
-        case CLASS_DRUID: {
-            if (player->HasAura(5487) || player->HasAura(9634)) // Bear form, Dire bear form
-            {
-                role = BOT_ROLE_TANK;
-            }
-
-            break;
-        }
-
-#ifdef MANGOSBOT_TWO
-        case CLASS_DEATH_KNIGHT: {
-            if (player->HasAura(48263)) // Frost presence
-            {
-                role = BOT_ROLE_TANK;
-            }
-
-            break;
-        }
-#endif
-        default: {
-            role = GetPlayerRoles(cls,tab);
-            break;
-        }
-    }
-
-    return GetPlayerRoles(cls, tab);
+    // This used to work out a role from what the character was doing right then
+    // - defensive stance, righteous fury, bear form - and then return the talent
+    // based answer anyway, throwing that work away. Restoring it would have made
+    // things worse, not better: the switch only ever set the tank bit, so a fury
+    // warrior who happened to stand in defensive stance would have been handed
+    // the tank slot with a fury build, while a feral druid was already
+    // recognised through its talents. The aura check is gone. The tree decides.
+    return GetPlayerRoles(player->getClass(), GetPlayerSpecTab(player));
 }
 
 void AiFactory::AddDefaultCombatStrategies(Player* player, PlayerbotAI* const facade, Engine* combatEngine)

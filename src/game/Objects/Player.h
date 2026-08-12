@@ -2271,7 +2271,10 @@ class Player final: public Unit
         static constexpr float RESTED_XP_TENT_CAP = 0.25f;
         static constexpr float RESTED_XP_CLIENT_RATIO = 0.5f;
         static constexpr float RESTED_XP_TENT_RATE = 0.000575f;
-        static constexpr uint32 RESTED_XP_KILL_BONUS_PCT = 50;
+        // Back to the classic hundred percent. Turtle halved this, which turns the
+        // rested pool into a mild discount instead of the double experience it is
+        // meant to be, and quietly punishes anyone who cannot play daily.
+        static constexpr uint32 RESTED_XP_KILL_BONUS_PCT = 100;
 
         float ComputeRest(time_t timePassed, bool offline = false, bool inRestPlace = false);
         float GetRestBonusCap(float visibleRestedLevelFraction) const;

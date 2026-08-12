@@ -90,8 +90,17 @@ public:
         void Randomize(Player* bot);
         void RandomizeFirst(Player* bot);
         void UpdateGearSpells(Player* bot);
+        // Pinned bots: kept logged in, never relocated. See PinnedBots in the config.
+        bool IsPinnedBot(uint32 guidLow);
+        void EnsurePinnedBotsOnline();
+
         void ScheduleTeleport(uint32 bot, uint32 time = 0);
         void ScheduleChangeStrategy(uint32 bot, uint32 time = 0);
+    private:
+        std::set<uint32> m_pinnedBots;
+        bool m_pinnedBotsResolved = false;
+        void ResolvePinnedBots();
+    public:
         void HandleCommand(uint32 type, const std::string& text, Player& fromPlayer, std::string channelName = "", Team team = TEAM_BOTH_ALLOWED, uint32 lang = LANG_UNIVERSAL, const std::string& to = "");
         std::string HandleRemoteCommand(std::string request);
         void OnPlayerLogout(Player* player);

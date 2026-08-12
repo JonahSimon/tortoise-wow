@@ -1,5 +1,6 @@
 
 #include "Category.h"
+#include <memory>
 #include "ItemBag.h"
 #include "ConsumableCategory.h"
 #include "TradeCategory.h"
@@ -173,6 +174,7 @@ void AvailableItemsBag::Load()
     std::set<uint32> vendorItems;
 
       auto results = WorldDatabase.PQuery("SELECT item FROM npc_vendor where maxcount = 0");
+      std::unique_ptr<QueryResult> results_guard(results);
       if (results != NULL)
       {
           do

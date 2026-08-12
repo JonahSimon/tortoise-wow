@@ -234,9 +234,21 @@ void EquipAction::EquipItem(PlayerbotAI* ai, Player* requester, Item* item, bool
         bool equipedBag = false;
         if (item->GetProto()->Class == ITEM_CLASS_CONTAINER || item->GetProto()->Class == ITEM_CLASS_QUIVER)
         {
-            Bag* pBag = (Bag*)&item;
             uint8 newBagSlot = GetSmallestBagSlot(bot);
-            if (newBagSlot > 0)
+
+            // GetSmallestBagSlot hands back a free bag slot when there is one, and
+            // otherwise the slot holding the smallest equipped bag. Displacing that
+            // second kind only works while it is empty: _CanStoreItem_InSpecificSlot
+            // refuses to move a non-empty bag (it is guarded as a dupe exploit) and
+            // SwapItem reports nothing back, so the code below used to set
+            // equipedBag = true for a swap that never happened - and the same
+            // decision then fired again on the very next tick. One bot was seen
+            // retrying about six times a second for hours, and every attempt logged
+            // an anticheat entry. Leave the smaller bag alone until it empties.
+            Item* const oldBag = newBagSlot > 0 ? bot->GetItemByPos(INVENTORY_SLOT_BAG_0, newBagSlot) : nullptr;
+            const bool oldBagIsFull = oldBag && oldBag->IsBag() && !((Bag*)oldBag)->IsEmpty();
+
+            if (newBagSlot > 0 && !oldBagIsFull)
             {
                 uint16 src = ((bagIndex << 8) | slot);
 

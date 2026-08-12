@@ -506,7 +506,11 @@ bool Engine::CanExecuteAction(const std::string& name, bool isUseful, bool isPos
 
 void Engine::addStrategy(const std::string& name)
 {
-    removeStrategy(name, initMode);
+    // The second argument means "rebuild now", and initMode means the opposite
+    // - hold rebuilds back until the bulk change is done - so passing one as
+    // the other had it exactly backwards. Neither removal needs its own
+    // rebuild: they belong to this add, which rebuilds once at the end.
+    removeStrategy(name, false);
 
     Strategy* strategy = aiObjectContext->GetStrategy(name);
     if (strategy)
@@ -514,7 +518,7 @@ void Engine::addStrategy(const std::string& name)
         std::set<std::string> siblings = aiObjectContext->GetSiblingStrategy(name);
         for (std::set<std::string>::iterator i = siblings.begin(); i != siblings.end(); i++)
         {
-            removeStrategy(*i, initMode);
+            removeStrategy(*i, false);
         }
 
         LogAction("S:+%s", strategy->getName().c_str());
@@ -573,7 +577,7 @@ void Engine::removeAllStrategies()
 
 void Engine::toggleStrategy(const std::string& name)
 {
-    if (!removeStrategy(name))
+    if (!removeStrategy(name, !initMode))
         addStrategy(name);
 }
 
@@ -830,6 +834,14 @@ void Engine::LogAction(const char* format, ...)
 void Engine::ChangeStrategy(const std::string& names)
 {
     std::vector<std::string> splitted = split(names, ',');
+
+    // Each entry would otherwise rebuild every strategy's triggers, although
+    // only the set left at the end matters. Hold the rebuilds back for the
+    // whole list and do one afterwards - the same thing
+    // PlayerbotAI::ResetStrategies does around its bulk change.
+    bool const wasInitMode = initMode;
+    initMode = true;
+
     for (std::vector<std::string>::iterator i = splitted.begin(); i != splitted.end(); i++)
     {
         const char* name = i->c_str();
@@ -842,7 +854,7 @@ void Engine::ChangeStrategy(const std::string& names)
             }
             case '-':
             {
-                removeStrategy(name+1);
+                removeStrategy(name+1, false);
                 break;
             }
             case '~':
@@ -852,6 +864,12 @@ void Engine::ChangeStrategy(const std::string& names)
             }
         }
     }
+
+    initMode = wasInitMode;
+
+    // Caller is in a bulk change of its own - it will rebuild when it is done.
+    if (!initMode)
+        Init();
 }
 
 void Engine::PrintStrategies(Player* requester, const std::string& engineType)

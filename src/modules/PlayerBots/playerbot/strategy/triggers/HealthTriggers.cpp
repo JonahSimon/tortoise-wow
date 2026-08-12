@@ -47,6 +47,21 @@ bool HealthInRangeTrigger::IsActive()
         && (!isTankRequired || (GetTarget()->IsPlayer() && ai->IsTank((Player*)GetTarget(), false)));
 }
 
+// This is the top-up tier - a party member between mediumHealth and
+// almostFullHealth, so between 70 and 90 percent by default. It is the tier that
+// fires most often by a wide margin, and a heal cast at 85 percent costs the same
+// mana as the one that saves somebody at 20. Once the healer's own mana is no
+// longer comfortable, that trade stops being worth making: skip the tier and keep
+// what is left for the ones below it, which are deliberately untouched and will
+// still fire at any mana level.
+bool PartyMemberAlmostFullHealthTrigger::IsActive()
+{
+    if (AI_VALUE2(uint8, "mana", "self target") < sPlayerbotAIConfig.mediumMana)
+        return false;
+
+    return PartyMemberLowHealthTrigger::IsActive();
+}
+
 bool PartyMemberDeadTrigger::IsActive()
 {
 	return GetTarget();

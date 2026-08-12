@@ -1,11 +1,13 @@
 
 #include "playerbot/playerbot.h"
 #include "CustomStrategy.h"
+#include <memory>
 #include <regex>
 
 using namespace ai;
 
 std::map<std::string, std::string> CustomStrategy::actionLinesCache;
+std::map<CustomStrategy::CacheKey, std::list<std::string>> CustomStrategy::loadedLines;
 
 NextAction* toNextAction(std::string action)
 {
@@ -60,9 +62,25 @@ void CustomStrategy::InitNonCombatTriggers(std::list<TriggerNode*> &triggers)
     {
         if (actionLinesCache[qualifier].empty())
         {
-            LoadActionLines((uint32)ai->GetBot()->GetGUIDLow());
-            if (this->actionLines.empty())
-                LoadActionLines(0);
+            // Both lookups used to run on every rebuild, for every bot. The
+            // outcome is remembered here instead - the empty one too, which is
+            // what stops the repeat.
+            uint32 const owner = (uint32)ai->GetBot()->GetGUIDLow();
+            CacheKey const key(qualifier, owner);
+
+            std::map<CacheKey, std::list<std::string>>::const_iterator cached = loadedLines.find(key);
+            if (cached != loadedLines.end())
+            {
+                this->actionLines = cached->second;
+            }
+            else
+            {
+                LoadActionLines(owner);
+                if (this->actionLines.empty())
+                    LoadActionLines(0);
+
+                loadedLines[key] = this->actionLines;
+            }
         }
         else
         {
@@ -99,6 +117,7 @@ void CustomStrategy::LoadActionLines(uint32 owner)
 {
     auto results = CharacterDatabase.PQuery("SELECT action_line FROM ai_playerbot_custom_strategy WHERE name = '%s' and owner = '%u' order by idx",
             qualifier.c_str(), owner);
+    std::unique_ptr<QueryResult> results_guard(results);
     if (results)
     {
         do
@@ -114,4 +133,18 @@ void CustomStrategy::Reset()
 {
     actionLines.clear();
     actionLinesCache[qualifier].clear();
+    ForgetCached(qualifier);
+}
+
+// Called when the lines behind a qualifier change, so the next rebuild reads
+// them again rather than serving what was true before the edit.
+void CustomStrategy::ForgetCached(std::string const& forQualifier)
+{
+    for (std::map<CacheKey, std::list<std::string>>::iterator i = loadedLines.begin(); i != loadedLines.end();)
+    {
+        if (i->first.first == forQualifier)
+            i = loadedLines.erase(i);
+        else
+            ++i;
+    }
 }

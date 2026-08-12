@@ -131,6 +131,19 @@ bool OutNumberedTrigger::IsActive()
     if (bot->GetGroup() && ai->HasRealPlayerMaster())
         return false;
 
+    // Being outmatched on paper is not by itself an emergency. The comparison
+    // below weighs levels and headcount, and `dLevel * 200` overtakes the
+    // friendly side as soon as a single opponent is two levels up - so a solo
+    // bot at full health broke off from one mob before a blow had landed. That
+    // is also the least useful moment to run: nothing has gone wrong yet, and
+    // the fight may well have been winnable. Engage first and let this decide
+    // whether to disengage once the fight has actually turned; at mediumHealth
+    // there is still enough left to get away. PanicTrigger covers the genuine
+    // near-death case separately, and it is deliberately narrower (critical
+    // health *and* no mana). Tunable via AiPlayerbot.MediumHealth.
+    if (AI_VALUE2(uint8, "health", "self target") >= sPlayerbotAIConfig.mediumHealth)
+        return false;
+
     int32 botLevel = bot->GetLevel();
     float healthMod = bot->GetHealthPercent() / 100.0f;
     uint32 friendPower = 100 + 100 * healthMod, foePower = 0;

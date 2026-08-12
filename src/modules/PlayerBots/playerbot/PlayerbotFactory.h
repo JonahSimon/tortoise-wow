@@ -86,8 +86,6 @@ private:
     bool InitLevelOne();
     void InitAvailableSpells();
     void InitSpecialSpells();
-    void InitTalentsTree(bool incremental);
-    void InitTalents(uint32 specNo);
     // Assigns the bot a premade talent spec (specNo) by weighted probability, so the
     // "auto talents" action applies the matching premade build. Returns false if the
     // class has no premade specs configured.

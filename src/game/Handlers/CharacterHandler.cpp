@@ -775,17 +775,17 @@ void WorldSession::HandlePlayerLogin(LoginQueryHolder *holder)
         SendNotification("WARNING: %s", warning);
     }
 
-    // --- Beginners-Gilde (custom): neue, gildenlose echte Spieler beim ersten
-    //     Einloggen automatisch in die konfigurierte Willkommensgilde aufnehmen.
-    //     Bots (GetPlayerbotAI) ausgeschlossen; nur bis Level 5. ---
+    // --- Beginners guild (custom): put new guildless real players into the
+    //     configured welcome guild on their first login. Bots are excluded
+    //     through GetPlayerbotAI, and only up to level 5. ---
     if (sConfig.GetBoolDefault("BeginnersGuilds", false)
         && pCurrChar->GetGuildId() == 0
         && !pCurrChar->GetPlayerbotAI()
         && pCurrChar->GetLevel() <= 5)
     {
-        // Random-Bots laufen auf RNDBOT-Accounts. Deren Session hat keinen
-        // Username (GetUsername() ist leer), daher den Account-Namen zuverlaessig
-        // ueber die ID holen und Bots ausschliessen.
+        // Random bots sit on RNDBOT accounts. Their session carries no username
+        // - GetUsername() is empty - so look the account name up by id instead,
+        // which is reliable, and exclude the bots that way.
         std::string beginnersAccName;
         sAccountMgr.GetName(GetAccountId(), beginnersAccName);
         if (beginnersAccName.rfind("RNDBOT", 0) != 0)

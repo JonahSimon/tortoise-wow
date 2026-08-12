@@ -62,7 +62,14 @@ bool ReviveFromCorpseAction::Execute(Event& event)
     bot->GetSession()->HandleReclaimCorpseOpcode(packet);
 
     SET_AI_VALUE(bool, "corpse run", false);
-    RESET_AI_VALUE(uint32, "death count");
+    // Deliberately NOT resetting "death count" here. BestGraveyardValue only
+    // switches to a graveyard outside the current zone once the count reaches
+    // DEATH_COUNT_BEFORE_TRYING_ANOTHER_GRAVEYARD - but a bot resurrecting is
+    // exactly the moment the count has to survive. Resetting here pinned it at
+    // 1 forever, so the escape hatch was unreachable and bots that died inside
+    // an enemy town (Razor Hill, Aerie Peak) resurrected into the same guards
+    // indefinitely. The count is still cleared by XpGainAction, i.e. once the
+    // bot is alive and earning again.
     sPlayerbotAIConfig.logEvent(ai, "ReviveFromCorpseAction");
 
     return true;
@@ -333,7 +340,14 @@ bool SpiritHealerAction::Execute(Event& event)
         bot->SpawnCorpseBones();
         bot->SaveToDB();
         SET_AI_VALUE(bool, "corpse run", false);
-        RESET_AI_VALUE(uint32, "death count");
+        // Deliberately NOT resetting "death count" here. BestGraveyardValue only
+        // switches to a graveyard outside the current zone once the count reaches
+        // DEATH_COUNT_BEFORE_TRYING_ANOTHER_GRAVEYARD - but a bot resurrecting is
+        // exactly the moment the count has to survive. Resetting here pinned it at
+        // 1 forever, so the escape hatch was unreachable and bots that died inside
+        // an enemy town (Razor Hill, Aerie Peak) resurrected into the same guards
+        // indefinitely. The count is still cleared by XpGainAction, i.e. once the
+        // bot is alive and earning again.
         context->GetValue<Unit*>("current target")->Set(nullptr);
         bot->SetSelectionGuid(ObjectGuid());
         ai->TellPlayer(requester, BOT_TEXT("hello"), PlayerbotSecurityLevel::PLAYERBOT_SECURITY_ALLOW_ALL, false);

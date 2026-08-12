@@ -229,27 +229,47 @@ void ChangeTalentsAction::listPremadePaths(uint8 cls, std::vector<TalentPath*> p
 
 TalentPath* ChangeTalentsAction::PickPremadePath(std::vector<TalentPath*> paths, bool useProbability)
 {
-    int totProbability = 0;
-    int curProbability = 0;
-
-    if(paths.size() == 1)
+    if (paths.size() == 1)
         return paths[0];
 
+    int totProbability = 0;
     for (auto path : paths)
-    {
         totProbability += useProbability ? path->probability : 1;
-    }
 
-    totProbability = irand(0, totProbability);
+    if (totProbability <= 0)
+        return paths[0];
 
+    // irand is inclusive at both ends. Rolling [0, total] and then comparing
+    // with >= handed the first path one slot more than the others - with three
+    // equal weights that is 33.9% against 33.0%. Rolling [0, total - 1] and
+    // comparing with a strict > gives each path exactly its share.
+    int const roll = irand(0, totProbability - 1);
+
+    TalentPath* chosen = paths[0];
+    int curProbability = 0;
     for (auto path : paths)
     {
         curProbability += (useProbability ? path->probability : 1);
-        if (curProbability >= totProbability)
-            return path;
+        if (curProbability > roll)
+        {
+            chosen = path;
+            break;
+        }
     }
 
-    return paths[0];
+    // Temporary. The stored specNo comes out around 78:22 for warriors where
+    // the weights say 50:50, and neither roll site accounts for that. This
+    // records what actually enters the draw, so the cause can be read off the
+    // log instead of guessed at. Remove once the distribution is understood.
+    std::ostringstream candidates;
+    for (auto path : paths)
+        candidates << path->name << "(" << (useProbability ? path->probability : 1) << ") ";
+
+    sLog.outBasic("SPECROLL: %sroll %d of %d among %s-> %s",
+        useProbability ? "" : "unweighted ", roll, totProbability,
+        candidates.str().c_str(), chosen->name.c_str());
+
+    return chosen;
 }
 
 bool ChangeTalentsAction::AutoSelectTalents(Player* bot, std::ostringstream* out, BotRoles role)
