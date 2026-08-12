@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 risk: low
 area: playerbots/transport
 ---
@@ -31,3 +31,5 @@ can therefore select flights the core will always refuse.
 Independently shippable, but pairs naturally with the `T3` fix (honour
 `UseTaxi`'s return value) and the `T2` fix (`OnTaxiFlightEject`) — together
 they cover reliable flight-path travel.
+
+**Result:** PR opened at https://github.com/ChrisMiho/tortoise-wow/pull/10
