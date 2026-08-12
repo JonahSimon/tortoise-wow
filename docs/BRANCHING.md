@@ -27,6 +27,23 @@ The same one-liner restores any other upstream branch this fork used to mirror
 (`dev`, `shop`, `challenges`, `1181dev`, `1181-rogue-fixes`, `feat-spell-dbc-loader`,
 `fix/bot-death-loop`). None of them were ever ours.
 
+## `gh` defaults to upstream, not this fork
+
+Any `gh` command run without an explicit `--repo` (`gh pr create`, `gh repo view`, `gh issue
+list`, ...) resolves against whichever of `origin`/`upstream` GitHub considers the *parent*
+when it sees a fork relationship — that's `upstream` (`Shyalya/tortoise-wow`), never `origin`
+(`ChrisMiho/tortoise-wow`), regardless of which branch is checked out. A `gh pr create`
+against `cm-main` without `--repo` will silently target upstream instead and fail with a
+confusing `No commits between cm-main and feature/yehaw` — upstream has no `cm-main`.
+
+Fix once per checkout — it persists in local git config (`remote.origin.gh-resolved`),
+shared across worktrees of this clone since they share `.git`, but **not** carried by a
+fresh clone elsewhere, so redo it after cloning:
+
+```bash
+gh repo set-default ChrisMiho/tortoise-wow
+```
+
 ## Syncing with upstream
 
 Because `playerbots-integration-gh` stays pristine, the sync is a fast-forward followed by one
