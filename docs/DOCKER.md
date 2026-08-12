@@ -26,12 +26,14 @@ the configs are tuned, so both are reused rather than duplicated.
 who can run `docker inspect tw2-db` can read the root password in plaintext.
 Treat docker access as equivalent to database access.
 
-The verify command below deliberately passes the password via `MYSQL_PWD` rather
-than `--password=`. A password given as a command-line flag is visible in `ps`
-inside the container and lands in shell history; `MYSQL_PWD` avoids both. The
-repo's public-safety gate (`turtle-ops/scripts/audit-public-safe.sh`) blocks on
-`--password=` for exactly this reason — if you reintroduce that form, the gate
-will refuse the next push, and it is right to.
+The verify command below deliberately passes the secret via `MYSQL_PWD` rather
+than as a `--password` CLI flag. A secret given on a command line is visible to
+`ps` inside the container and lands in shell history; `MYSQL_PWD` avoids both.
+
+The repo's public-safety gate (`turtle-ops/scripts/audit-public-safe.sh`) blocks
+that flag form outright, so reintroducing it will fail the next push — correctly.
+Note the gate matches on the literal flag text, so even *writing it out* in a doc
+trips it; that is why this paragraph describes the flag instead of spelling it.
 
 ## Start / stop
 
