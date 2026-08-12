@@ -35,6 +35,10 @@ public:
     virtual bool isUseful() override;
     virtual bool canJoinBg(Player* player, BattleGroundQueueTypeId queueTypeId, BattleGroundBracketId bracketId);
     virtual bool shouldJoinBg(BattleGroundQueueTypeId queueTypeId, BattleGroundBracketId bracketId);
+    // Whether an explicitly-set "bg type" overrides the ambient join heuristics.
+    // True on the commanded path. FreeBGJoinAction turns it off so the RPG
+    // battlemaster route stays subject to the bot battleground cap.
+    virtual bool honoursCommandedBgType() const { return true; }
 #ifndef MANGOSBOT_ZERO
     virtual bool gatherArenaTeam(ArenaType type);
 #endif
@@ -60,6 +64,7 @@ public:
         virtual std::vector<std::string> GetUsedValues() { return {}; }
 #endif 
     virtual bool shouldJoinBg(BattleGroundQueueTypeId queueTypeId, BattleGroundBracketId bracketId);
+    virtual bool honoursCommandedBgType() const override { return false; }
 };
 
 class BGLeaveAction : public Action

@@ -654,7 +654,14 @@ bool BGJoinAction::isUseful()
     // (RpgSubActions.h:258). Execute() honours it directly and never consults bgList,
     // so re-rolling the ambient composition heuristics here would only add variance
     // to a choice that was not ours to make.
-    if (AI_VALUE(uint32, "bg type"))
+    //
+    // Only on the commanded path, though. This also skips BotBattlegroundLimitReached(),
+    // which is reached only via shouldJoinBg() in the bgList loop below. A tournament
+    // wants a forced, deterministic queue; the general population should still be held
+    // to one instance per bracket. The battlemaster route sets "bg type" and then
+    // dispatches to "free bg join", so FreeBGJoinAction overrides
+    // honoursCommandedBgType() to false and falls through to the cap.
+    if (honoursCommandedBgType() && AI_VALUE(uint32, "bg type"))
         return true;
 
     // reduce amount of healers in BG
