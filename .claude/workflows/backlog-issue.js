@@ -33,8 +33,10 @@ const IMPLEMENT_SCHEMA = {
   properties: {
     branchName: { type: 'string' },
     summary: { type: 'string' },
+    problem: { type: 'string' },
+    acceptanceCriteria: { type: 'string' },
   },
-  required: ['branchName', 'summary'],
+  required: ['branchName', 'summary', 'problem', 'acceptanceCriteria'],
 }
 
 const FIX_SCHEMA = {
@@ -141,8 +143,13 @@ const implemented = await agent(
    commit style (run "git log --oneline -20" first to match the voice).
    Do not push and do not open a PR — a later phase does that.
 
-   Return the exact branch name you created and a one-paragraph summary of
-   the change.`,
+   Return:
+   - the exact branch name you created
+   - a one-paragraph summary of the change you made
+   - the artifact's Problem section, quoted verbatim
+   - the artifact's Acceptance criteria section, quoted verbatim
+   The last two are copied as-is so a later phase can put them in the PR
+   description without re-reading the artifact itself.`,
   { phase: 'Implement', isolation: 'worktree', label: 'implement', schema: IMPLEMENT_SCHEMA }
 )
 
@@ -251,7 +258,7 @@ if (dryRun) {
 // reading the PR is the only one who will ever see them. Surface them there.
 const minorSection = minor.length > 0
   ? `
-   5. A section headed "Automated review — non-blocking findings", listing exactly
+   7. A section headed "Automated review — non-blocking findings", listing exactly
       these and nothing else, one bullet per line:
 ${minor.map((f) => `      - ${f.file}: ${f.summary}`).join('\n')}`
   : ''
@@ -270,9 +277,11 @@ const prResult = await agent(
 
    Body must include, in this order:
    1. The backlog artifact this implements: ${artifactLabel}
-   2. Its acceptance criteria, copied from the artifact
-   3. This verification note, verbatim: "${verifyNote || 'not available'}"
-   4. A line stating manual in-game testing is still required before merge${minorSection}
+   2. Problem, quoted verbatim: "${implemented.problem}"
+   3. Summary of the change made: ${implemented.summary}
+   4. Acceptance criteria, quoted verbatim: "${implemented.acceptanceCriteria}"
+   5. This verification note, verbatim: "${verifyNote || 'not available'}"
+   6. A line stating manual in-game testing is still required before merge${minorSection}
 
    Return the URL of the pull request you opened, and nothing else in that field.
    If you could not push or could not open the PR, say so in prUrl rather than
