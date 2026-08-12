@@ -15,12 +15,11 @@ fork runs a small private server with **~1000 playerbots** permanently online. U
 (Shyalya) is merged in periodically; everything below is what this fork adds on top. See
 [`docs/BRANCHING.md`](docs/BRANCHING.md) for the two-branch layout and how the sync works.
 
-**This is a personal experiment, not a project looking for contributors.** It exists to
+**This is a personal experiment, not a something I plan to formally release.** It exists to
 run one private server and to see how a thousand-bot AI holds up under real, sustained
 load — the fixes below exist because something broke in play and got traced back to its
 cause, which is why the commit messages read like bug reports rather than feature notes.
-If any of it is useful to you, take it; there's no roadmap and no obligation to keep
-anything here stable for anyone else.
+If any of it is useful to you, take it.
 
 ### Quickstart with Docker
 
