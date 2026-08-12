@@ -79,7 +79,7 @@ Before a drain run:
   artifact. `backlog-drain`'s "Before trusting an unattended run" section spells
   out exactly what to check.
 - **A human watching the first few real ticks.** Start the loop, don't walk
-  away from it. Each tick opens a PR against `playerbots-integration-gh`; there
+  away from it. Each tick opens a PR against `cm-main`; there
   is no CI and no test suite to catch a bad one.
 
 ### Stopping a drain

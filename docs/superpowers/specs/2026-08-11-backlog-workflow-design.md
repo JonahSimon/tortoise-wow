@@ -121,7 +121,7 @@ actively watching the conversation.
 ### Branch strategy
 
 Every issue's branch is cut independently from the current tip of
-`playerbots-integration-gh` at the moment that issue's tick starts — branches
+`cm-main` at the moment that issue's tick starts — branches
 are **not** stacked on each other's unmerged work. Rationale:
 
 - Artifacts are scoped to be independent problems, so most branches won't
@@ -140,7 +140,7 @@ merge and never rebases anything.
 A named Workflow (`.claude/workflows/backlog-issue.js`), invoked by the drain
 skill as `Workflow({name: "backlog-issue", args: {artifactPath}})`:
 
-1. **Implement** — worktree-isolated, branch cut from `playerbots-integration-gh`.
+1. **Implement** — worktree-isolated, branch cut from `cm-main`.
    One agent implements the fix per the artifact's problem/cause/acceptance
    criteria.
 2. **Review** — the real safety net given no CI/tests exist. Parallel
@@ -152,7 +152,7 @@ skill as `Workflow({name: "backlog-issue", args: {artifactPath}})`:
    PR body rather than silently implying it compiles. Either way, the PR
    description flags manual in-game testing as the real verification gate,
    per `CONTRIBUTING.md`.
-4. **PR** — commit, push, `gh pr create` against `playerbots-integration-gh`,
+4. **PR** — commit, push, `gh pr create` against `cm-main`,
    referencing the artifact and its acceptance criteria.
 
 ## Packaging
