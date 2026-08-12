@@ -18,6 +18,14 @@ cd "$REPO"
 
 JOBS="${BUILD_JOBS:-2}"
 
+# Git Bash puts docker.exe on PATH, so the guard below passes there and the build
+# runs to completion — but MSYS rewrites POSIX absolute paths handed to a native
+# .exe, so every in-container check becomes "C:/Program Files/Git/opt/turtle/..."
+# and reports a false FAIL on a perfectly good image. Observed 2026-08-11: all five
+# acceptance checks failed this way after a full ~40 minute compile that had in fact
+# succeeded. Fails closed rather than let that happen again.
+[ -z "${MSYSTEM:-}" ] \
+  || { echo "FATAL: run this from WSL, not Git Bash (MSYSTEM=$MSYSTEM)." >&2; exit 1; }
 command -v docker >/dev/null 2>&1 \
   || { echo "FATAL: docker not on PATH. Run this from WSL, not Windows." >&2; exit 1; }
 docker info >/dev/null 2>&1 \
