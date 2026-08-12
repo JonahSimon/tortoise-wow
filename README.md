@@ -7,44 +7,104 @@ This project targets version 1.18.1 build 7272
 
 ## About this fork
 
-A fork of **[Penqle/tortoise-wow](https://github.com/Penqle/tortoise-wow)** running a
-small private server with **~1000 playerbots** permanently online. Upstream is merged in
-periodically; everything below is what this fork adds on top.
+**ChrisMiho's fork of [Shyalya/tortoise-wow](https://github.com/Shyalya/tortoise-wow)**
+(branch `playerbots-integration-gh`), which itself carried
+[r-o-sh's playerbot integration](https://github.com/r-o-sh/tortoise-wow/tree/playerbots-integration-gh)
+— vendoring [ike3's playerbots][20] — onto Penqle/tortoise-wow's 1.18.1 restoration. This
+fork runs a small private server with **~1000 playerbots** permanently online. Upstream
+(Shyalya) is merged in periodically; everything below is what this fork adds on top. See
+[`docs/BRANCHING.md`](docs/BRANCHING.md) for the two-branch layout and how the sync works.
 
-**Playerbots are the foundation of this fork, not a side feature.** Upstream still lists
-them as planned; here they are what the server is built around, and running a thousand of
-them permanently is what shapes everything else. Load like that reaches code paths a
-few dozen players never touch — stale cached pointers, an unsynchronised battleground
-queue, navmesh tiles unloaded under a running query. Most of the fixes below started as
-something that went wrong in game and was traced back to its cause, which is why the
-commit messages read like bug reports rather than feature notes.
+**This is a personal experiment, not a project looking for contributors.** It exists to
+run one private server and to see how a thousand-bot AI holds up under real, sustained
+load — the fixes below exist because something broke in play and got traced back to its
+cause, which is why the commit messages read like bug reports rather than feature notes.
+If any of it is useful to you, take it; there's no roadmap and no obligation to keep
+anything here stable for anyone else.
+
+### Quickstart with Docker
+
+The whole stack (`realmd`, `mangosd`, `mariadb`) runs in Docker; full detail, log-growth
+caps, and the rebuild/rollback flow are in [`docs/DOCKER.md`](docs/DOCKER.md), but the
+short version, run from **inside WSL Ubuntu** (Docker Desktop's engine is shared, but
+bind-mount paths only resolve correctly from the WSL side):
+
+```bash
+cd /mnt/d/CodingProjects/tortoise-wow/tortoise-wow
+cp .env.example .env        # fill in DB_PASS and the TW_DATA/TW_ETC/TW_LOGS paths
+docker compose up -d        # start realmd + mangosd + mariadb
+docker compose down         # stop them — NEVER add -v, it deletes the character database
+```
+
+A C++ change needs `./scripts/rebuild.sh` (~40 minutes) before `docker compose up -d`
+picks it up — see `docs/DOCKER.md` for the full rebuild/verify/rollback cycle.
 
 ### Playerbots
 
-Integrated from [r-o-sh's branch](https://github.com/r-o-sh/tortoise-wow/tree/playerbots-integration-gh),
-which vendors [ike3's playerbots][20] under `src/modules/PlayerBots/`. Build with
-`-DBUILD_PLAYERBOTS=ON`; activation is gated by `AiPlayerbot.Enabled`.
+Vendored under `src/modules/PlayerBots/`. Build with `-DBUILD_PLAYERBOTS=ON` (defaults
+`OFF`, no warning if you forget); activation is gated by `AiPlayerbot.Enabled`.
 
-Fixes made while running them:
+Running ~1000 of them permanently surfaces load a few dozen players never reach — stale
+cached pointers, an unsynchronised battleground queue, navmesh tiles unloaded mid-query.
+The fixes cluster around a few themes:
 
-| Area | What was wrong |
-|---|---|
-| Battlegrounds | Bots never queued, never entered, and dropped the flag on a PvP trinket. Three separate bugs, including a call to `HandleBattlefieldPortOpcode` where `HandleBattleFieldPortOpcode` was meant — different function, same name but for one letter's case |
-| Dungeon finder | Filled a waiting group with bots and held them to the role they were given; shamans no longer land on the tank slot, and a bot whose tree does not fit its role gets respecced |
-| Druids | Never learned bear form, so a tank druid stayed in caster shape. Now learned at 10/16/40, with a backfill for existing bots |
-| Healers | Heal range was 125 yards — three times what any heal can reach — so healers walked away instead of healing. The second healer in a group picked a target already at full health and did nothing at all |
-| Targeting | Stealth breaks a bot's current target again; hunters no longer try to tame shapeshifted druids |
-| Summoning | Works without a meeting stone, reports why it failed, and no longer drops the bot under the world |
-| Group loot | Bots vote instead of letting every countdown expire |
-| Talent specs | Premade specs generated for the talent rate the config actually ships — the stock vanilla links are all rejected by Turtle's reworked trees |
-| Target values | Cached a raw `Unit*` for up to a second. If the creature died inside that window the next read followed a freed pointer — crash in `AttackAction::IsTargetValid`. The guid is carried alongside now and cached reads resolve through the object accessor |
-| Battleground queue | `BattleGroundQueue` declares a `recursive_mutex`, but all five acquisitions were left commented out during the ACE migration. A thousand bots queueing from parallel map threads tore the `std::map` apart. Restored |
-| Anticheat on bot sessions | `m_antiCheat` is only assigned during a network login, so bot sessions carried a null pointer for life — and seven call sites in `MovementHandler` dereference it unchecked, one of which the bot module calls directly. Every session now starts with the `NullSessionAnticheat` the core already ships |
-| Dungeon fill | A role that cannot be filled is counted as covered, but the queue count does not follow — so with no tank available the group stopped at four and could never form, the matcher wanting exactly one tank, one healer and three damage. The player waited without being told anything. The level window is asymmetric now (a bot above the waiting player still works, one below misses and dies), a tank can be taken out of a bot-only run, and an unfilled role is logged |
-| Spec selection | Warriors come out 125 fury against 35 protection where the configured weights say 50:50 — and on a bot realm the protection warriors are the tank supply. Fixed on the way: an off-by-one that gave the first path an extra slot, a talent tree called from nowhere that read a config field nothing fills, and a role switch whose result was computed and discarded. The remaining skew is logged rather than guessed at |
-| Strategy rebuilds | `Engine::Init()` discards and rebuilds every strategy's triggers, and it ran once per strategy in a list rather than once per change — 105 million trigger initialisations an hour, near 29,000 a second, inside 4.4 billion allocations. One flag was passed the wrong way round: `initMode` means "hold back", the parameter it was handed means "do it now" |
-| Custom strategies | `+custom::learned` is in the default strategy list, so every bot asked the database twice on every rebuild for action lines that ten characters out of a thousand actually have. The cache meant to prevent that is written by no code path in the tree. Results are remembered now, the empty ones included |
-| Stability | The bot logger passed finished text to `vfprintf` as a format string; any bot name containing `%` aborted the server on MSVC |
+- **Battlegrounds & dungeon finder** — bots that never queued or entered, dropped the flag
+  on a PvP trinket, filled the wrong role, or sat at a 125-yard heal range (3x the real
+  cap) instead of actually healing.
+- **Stability under load** — a `recursive_mutex` left commented out during an ACE
+  migration let a thousand bots queueing in parallel tear apart a `std::map`; a null
+  anticheat pointer was dereferenced on every bot session; a bot name containing `%` was
+  passed straight into `vfprintf` as a format string and aborted the server.
+- **Hot-path performance** — `Engine::Init()` was rebuilding every strategy's triggers once
+  per strategy in a list instead of once per change: 105 million trigger initialisations an
+  hour, ~29,000/sec, inside 4.4 billion allocations.
+- **Class/spec correctness** — druids never learned bear form, warriors specced 125 fury
+  to 35 protection against a configured 50:50 (and protection warriors are the tank
+  supply on a bot realm), talent links rejected by Turtle's reworked trees.
+
+Each one started as something that broke in play and got traced back to its cause — the
+full list, with file and line references, is in the git log.
+
+### How the bot AI works
+
+This is the actual focus of the experiment, so it's worth explaining rather than just
+linking out. Full depth — line references, the two bugs found and fixed while filling a
+party with bots, tier-by-tier config examples — lives in
+[`docs/playerbots/PLAYERBOT-AI-HANDOFF.md`](docs/playerbots/PLAYERBOT-AI-HANDOFF.md); this
+is the summary.
+
+Each bot is a **priority-queue reactive planner**, not a behaviour tree or a state
+machine. A `PlayerbotAI` holds one `Engine` per `BotState` (combat, non-combat, dead,
+reaction), each with its own strategies and actions. A **strategy** contributes trigger
+nodes of the form `trigger > action!priority`; every tick, every trigger in the active
+engine is evaluated, firing triggers push their actions into a priority queue, a
+**multiplier** pass scales or vetoes priorities for cross-cutting rules ("don't cast while
+silenced", "healing outranks damage"), and the highest-priority action that reports itself
+executable runs. **Values** are the ~195 lazily-evaluated, cached world-state accessors
+("current target", "party member to heal") that both triggers and actions read, so state
+is computed once per tick rather than once per consumer. Strategies toggle on and off by
+name with `+`/`-` in `aiplayerbot.conf`:
+
+```
+AiPlayerbot.CombatStrategies    = +custom::say,+dps,+dps assist,-threat
+AiPlayerbot.NonCombatStrategies = +grind,+loot,+custom::say,+return,+delayed roll,+tfish,+wander,+rpg craft
+```
+
+Three ways to change bot behaviour, in order of cost:
+
+1. **Config** (`aiplayerbot.conf`) — live-reloadable with `.rndbot reload`, no restart.
+2. **`custom::<name>` strategies** — `trigger>action!priority` lines stored in the
+   `ai_playerbot_custom_strategy` table, composed from the existing ~300 actions and ~48
+   triggers entirely in SQL, applied globally (`owner = 0`) or to one bot. Needs a bot AI
+   reset, not a rebuild.
+3. **C++** — adding a command is a small change (one handler entry plus one function), but
+   the real cost is the ~30-minute image rebuild, not the code.
+
+Spawning bots to test against: `.rndbot group login=1` fills a role-balanced party at your
+level and logs everyone in (the bare command without `login=1` creates the bots but never
+brings them online — see the handoff doc's §8 for why). `.rndbot` always creates from the
+shared `RNDBOT` pool; `.bot` eats your own 9 character slots, so prefer `.rndbot` for
+anything disposable.
 
 ### Server features
 
@@ -113,14 +173,13 @@ Two are deliberately manual, in `sql/tools/`, because both depend on per-server 
   the migrations under `sql/database_updates`. Only client data (maps, DBC, vmaps, mmaps)
   has to be extracted from a game client, with the tools under `tools/`
 
-Several of the fixes below are also kept as standalone patches, each one
+Several of the fixes above are also kept as standalone patches, each one
 self-contained, so they can be lifted onto any compatible tree without taking
 the rest of this fork with them. Ask if you want one.
 
 Work from other forks is pulled in where it fits and credited in the commit —
 the mage pass comes from [faemwow/tortoise-wow](https://github.com/faemwow/tortoise-wow),
-whose repository is also worth a look if you would rather run this in Docker or
-build it with Nix.
+whose repository is also worth a look if you want to build this with Nix instead.
 
 > **Note on the client:** the core must be built with `-DALLOW_TURTLE_ADDONS=ON`, otherwise
 > the client crashes with "interface corrupt" on entering the world.
@@ -139,7 +198,7 @@ Additions will be added as the core code reaches feature completion
 - **Autoscale** - Rudimentary toggleable dungeon/raid auto scaling system, found in mangosd.conf
 - **Leech** - Basic toggleable leech system designed for solo play, found in mangosd.conf
 - **Additional Talent Points** - Mostly used for testing, found in tw_char.characters
-- **[Playerbots][20]** *(this fork)* - Integrated from [r-o-sh's branch](https://github.com/r-o-sh/tortoise-wow/tree/playerbots-integration-gh). Not an experiment: ~1000 of them run permanently and the fork is built around them. Upstream still lists this as planned.
+- **[Playerbots][20]** *(this fork)* - Integrated from [r-o-sh's branch](https://github.com/r-o-sh/tortoise-wow/tree/playerbots-integration-gh). Not experimental — ~1000 of them run permanently and the fork is built around them. Upstream still lists this as planned.
 
 #### Planned Additions
 
@@ -187,20 +246,6 @@ This will be streamlined once the core is more up to date
 > INSERT INTO migrations (Name, Hash, AppliedAt)
 > VALUES ('20260726112016_world', 'manual', NOW());
 > ```
-
-## Contributing
-
-**For this fork:** improvements to the core itself are best directed at
-[upstream](https://github.com/Penqle/tortoise-wow) rather than here — this fork
-exists to run a private server and only tracks upstream plus the additions
-listed at the top.
-
-Upstream's note follows:
-
-> Contributions are welcome, but I may be slow to review and merge PRs
->
-> See `CONTRIBUTING.md` for ways to get started.
-
 
 [1]: http://git-scm.com/ "Git - Distributed version control system"
 [2]: http://windows.github.com/ "github - windows client"
