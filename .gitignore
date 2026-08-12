@@ -14,6 +14,9 @@
 # Isolated worktrees for agent-driven implementation work
 /.worktrees/
 
+# Subagent-driven-development scratch: ledgers, briefs, review packages
+/.superpowers/
+
 # backlog-drain stop sentinel: user-created, deleted once honored, never meant to be committed
 /docs/backlog/.stop
 
