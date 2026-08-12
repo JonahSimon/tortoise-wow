@@ -34,5 +34,21 @@
 # way). Ignored so a stray `git add -A` cannot publish 65 unreviewed files.
 # The migration copies vetted files into scripts/ and tests/ deliberately, one
 # at a time, behind that plan's audit gate — it never stages these directories.
+#
+# They are also REDUNDANT, not a last copy: TRUNK-SEED-HANDOFF.md §1 verified
+# them byte-identical to ChrisMiho/turtle-tournament's `proper-setup` branch,
+# a private repo still intact at D:\TurtleWow with a live remote. The dumps are
+# in fact a strict SUBSET — §2 found two workstreams that live only on that
+# repo's origin/main and appear in no dump at all. Committing these would
+# preserve less than what is already preserved, at the cost of publishing:
+#   - OldHandoffs/backups/pre-alive-world-*/.env — a REAL 18-char DB_PASS, not
+#     a ${VAR} or __PLACEHOLDER__. Verified by assignment shape, value unread.
+#   - a third party's CGNAT home-server address, in 4 files
+#   - .ts.net / tailnet identifiers, in 3 more
 /OldScripts/
 /oldTests/
+/OldHandoffs/
+
+# Superseded by TRUNK-SEED-HANDOFF.md on the "nothing is lost" question, and
+# kept on disk only as a trail. Clean of identifiers, but nothing reads it.
+/NEXT-SESSION-HANDOFF.md
