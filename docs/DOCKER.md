@@ -101,6 +101,38 @@ Set `TW_IMAGE` back to `tortoise-v2:local` once you have rebuilt a good image.
 | Ports 3724 / 8095 | Shared with the older V1 stack. They cannot run together. |
 | `Release: 1970-01-01` in the log | Expected. `.git` is excluded from the build context, so the revision falls back; the real commit is on the image's `org.opencontainers.image.revision` label. |
 
+## Log growth
+
+Two separate things grow, in two separate places, and neither is bounded by default.
+
+**`logs/bots.log`** is the bot AI's per-tick decision trace. It is written at `DETAIL`
+and **ignores `LogFileLevel`**, so nothing in `mangosd.conf` slows it down. Idle it is
+trivial (~14 KB/min); during a battleground it has been measured at **22 MB/min**, and
+it reached **12 GB** once. It is capped by a `logrotate` rule outside this repo:
+
+| | |
+|---|---|
+| Config | `/etc/logrotate.turtle-bots.conf` |
+| Schedule | `/etc/cron.d/turtle-bots-logrotate`, every 5 minutes |
+| Budget | 250 MB trigger + worst-case drift + 1 compressed copy ≈ **375 MB** |
+
+The 5-minute cadence is the point, not the size. Size-based rotation only rotates when
+logrotate actually *runs*, and the distro timer fires once a day — at 22 MB/min that is
+~30 GB between checks. The rule uses `copytruncate` because mangosd holds the file open
+`O_APPEND`; renaming it would leave the server writing to an orphaned inode forever.
+
+To turn the trace off entirely instead, set `AiPlayerbot.BotLogFile = ""` in
+`aiplayerbot.conf` and restart. You lose only the per-tick action trace — bot errors
+still reach `errors.log`, and `bg.log`, `bot_events.csv` and `deaths.csv` are untouched.
+
+**Container logs** are the other half, and they are easy to forget because they are not
+in `logs/` at all — they live inside the Docker VM, so `du` on this repo never shows
+them. `mangosd` writes every SQL statement to stdout. `docker-compose.yml` caps each
+service at 50 MB × 3 files. That takes effect on `docker compose up -d`, not `restart`.
+
+Old `logs/server_<date>.log` files are not rotated by anything and simply accumulate —
+delete stale ones by hand.
+
 ## Where the source of truth is
 
 This checkout is **not** the only tree of this repo on the machine. A second,

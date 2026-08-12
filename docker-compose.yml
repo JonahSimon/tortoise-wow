@@ -9,6 +9,17 @@
 # which would point the stack at a new, empty database volume.
 name: tortoise-wow-v2
 
+# Docker's json-file driver defaults to NO size limit, and these logs are easy to
+# forget because they do not live in logs/ — they are inside the Docker VM, where
+# `du` on the repo will never show them. mangosd writes every SQL statement to
+# stdout, so its container log is the one that runs away. 50 MB x 3 caps each
+# service at 150 MB. Takes effect on `up -d` (container recreate), not `restart`.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
   db:
     # 10.6, NOT 11.8. sql/create_databases.sql is a MariaDB 10.6 dump using
@@ -43,6 +54,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 60
+    logging: *default-logging
     networks: [tw2-net]
 
   realmd:
@@ -60,6 +72,7 @@ services:
       - "${TW_LOGS:?set TW_LOGS in .env}:/opt/turtle/logs"
     working_dir: /opt/turtle/bin
     command: ["./realmd", "-c", "/opt/turtle/etc/realmd.conf"]
+    logging: *default-logging
     networks: [tw2-net]
 
   mangosd:
@@ -94,6 +107,7 @@ services:
     # mangosd needs a console on stdin or it exits immediately with no error.
     stdin_open: true
     tty: true
+    logging: *default-logging
     networks: [tw2-net]
 
 volumes:
