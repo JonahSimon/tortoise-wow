@@ -33,8 +33,10 @@ const IMPLEMENT_SCHEMA = {
   properties: {
     branchName: { type: 'string' },
     summary: { type: 'string' },
+    problem: { type: 'string' },
+    acceptanceCriteria: { type: 'string' },
   },
-  required: ['branchName', 'summary'],
+  required: ['branchName', 'summary', 'problem', 'acceptanceCriteria'],
 }
 
 const FIX_SCHEMA = {
@@ -119,6 +121,18 @@ if (normalizedArgs.dryRun === false) {
   dryRun = true
 }
 
+// This fork's trunk is cm-main, not playerbots-integration-gh -- the latter is a
+// pristine fast-forward-only mirror of upstream that is never committed to
+// directly (see docs/BRANCHING.md). Every branch/diff/PR-base below must point
+// at cm-main.
+const BASE_BRANCH = 'cm-main'
+
+// gh commands without an explicit --repo resolve against whichever remote GitHub
+// considers the fork's parent (upstream), not this fork -- also documented in
+// docs/BRANCHING.md. An unattended PR-create call must pin this explicitly or it
+// can silently target the wrong repository.
+const GH_REPO = 'ChrisMiho/tortoise-wow'
+
 phase('Implement')
 const implemented = await agent(
   `Read the backlog artifact at ${artifactPath} FIRST, before creating or switching
@@ -126,10 +140,12 @@ const implemented = await agent(
    it after a branch switch is unreliable — read it now and keep its contents.
    It scopes one bug fix for the Tortoise-WoW mangos server fork (a C++ codebase).
 
-   Then run "git fetch origin playerbots-integration-gh" and cut your new branch
-   from origin/playerbots-integration-gh — not from the plain local
-   playerbots-integration-gh ref, which can lag arbitrarily far behind origin
-   during a long unattended drain. Name the branch
+   Then run "git fetch origin ${BASE_BRANCH}" and cut your new branch
+   from origin/${BASE_BRANCH} — not from the plain local
+   ${BASE_BRANCH} ref, which can lag arbitrarily far behind origin
+   during a long unattended drain, and never from playerbots-integration-gh,
+   which is a pristine fast-forward-only mirror this fork never commits to.
+   Name the branch
    backlog/<the artifact's filename with its NNN- numeric prefix and .md
    extension stripped> — e.g. 003-bots-stuck-at-spirit-healer.md gives
    backlog/bots-stuck-at-spirit-healer. Nothing else is an acceptable branch
@@ -141,8 +157,13 @@ const implemented = await agent(
    commit style (run "git log --oneline -20" first to match the voice).
    Do not push and do not open a PR — a later phase does that.
 
-   Return the exact branch name you created and a one-paragraph summary of
-   the change.`,
+   Return:
+   - the exact branch name you created
+   - a one-paragraph summary of the change you made
+   - the artifact's Problem section, quoted verbatim
+   - the artifact's Acceptance criteria section, quoted verbatim
+   The last two are copied as-is so a later phase can put them in the PR
+   description without re-reading the artifact itself.`,
   { phase: 'Implement', isolation: 'worktree', label: 'implement', schema: IMPLEMENT_SCHEMA }
 )
 
@@ -179,12 +200,12 @@ const reviews = await parallel(lenses.map((lens) => () =>
 
      Branch "${branchName}" has the change. Branch and remote-tracking refs are
      shared across worktrees in this repository, so run
-     "git diff origin/playerbots-integration-gh...${branchName}" directly from
+     "git diff origin/${BASE_BRANCH}...${branchName}" directly from
      wherever you are -- no need to locate or check out that branch's worktree.
-     Diff against origin/playerbots-integration-gh, never the bare local
-     playerbots-integration-gh: the branch was cut from origin (the Implement
+     Diff against origin/${BASE_BRANCH}, never the bare local
+     ${BASE_BRANCH}: the branch was cut from origin (the Implement
      phase fetched it), and the local ref can lag behind, which would drag
-     already-merged upstream commits into what you're reviewing as if they were
+     already-merged commits into what you're reviewing as if they were
      part of this change.
      Artifact for context: ${artifactPath}.
 
@@ -243,7 +264,7 @@ const verifyNote = await agent(
 
 phase('PR')
 if (dryRun) {
-  log(`[dry run] would push ${branchName} and open a PR against playerbots-integration-gh`)
+  log(`[dry run] would push ${branchName} and open a PR against ${BASE_BRANCH} on ${GH_REPO}`)
   return { success: true, dryRun: true, branchName, verifyNote: verifyNote || '' }
 }
 
@@ -251,28 +272,31 @@ if (dryRun) {
 // reading the PR is the only one who will ever see them. Surface them there.
 const minorSection = minor.length > 0
   ? `
-   5. A section headed "Automated review — non-blocking findings", listing exactly
+   7. A section headed "Automated review — non-blocking findings", listing exactly
       these and nothing else, one bullet per line:
 ${minor.map((f) => `      - ${f.file}: ${f.summary}`).join('\n')}`
   : ''
 
 const prResult = await agent(
   `Push branch "${branchName}" to origin, then open a pull request for it
-   against base branch playerbots-integration-gh. Branch refs are shared across
+   against base branch ${BASE_BRANCH}. Branch refs are shared across
    worktrees in this repository, so you do not need to check out or locate that
    branch's worktree first -- from your current checkout, run "git push origin
-   ${branchName}" directly, then "gh pr create --head ${branchName}
-   --base playerbots-integration-gh" with the title and body below (the explicit
-   --head/--base flags avoid relying on whichever branch happens to be checked out
-   where you're running).
+   ${branchName}" directly, then "gh pr create --repo ${GH_REPO} --head ${branchName}
+   --base ${BASE_BRANCH}" with the title and body below (the explicit
+   --repo/--head/--base flags avoid gh's default of resolving against upstream
+   instead of this fork, and avoid relying on whichever branch happens to be
+   checked out where you're running).
 
    Title: a short summary of the fix, in this repo's existing commit-message voice.
 
    Body must include, in this order:
    1. The backlog artifact this implements: ${artifactLabel}
-   2. Its acceptance criteria, copied from the artifact
-   3. This verification note, verbatim: "${verifyNote || 'not available'}"
-   4. A line stating manual in-game testing is still required before merge${minorSection}
+   2. Problem, quoted verbatim: "${implemented.problem}"
+   3. Summary of the change made: ${implemented.summary}
+   4. Acceptance criteria, quoted verbatim: "${implemented.acceptanceCriteria}"
+   5. This verification note, verbatim: "${verifyNote || 'not available'}"
+   6. A line stating manual in-game testing is still required before merge${minorSection}
 
    Return the URL of the pull request you opened, and nothing else in that field.
    If you could not push or could not open the PR, say so in prUrl rather than
