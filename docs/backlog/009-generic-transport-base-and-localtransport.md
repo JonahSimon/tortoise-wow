@@ -110,6 +110,40 @@ measurement signal the calibration step needs. The remaining half of that
 acceptance criterion — measuring each entry's offset in-game — is not
 achievable from static analysis, as this artifact already states.
 
+**Adjudicated (2026-08-12):** the dispute splits — the block was correct, but
+not for the reason given.
+
+*On the clock, the implementer is right.* `Object.cpp:503–515` branches on
+transport kind: an MO transport sends `GetPathProgress()` (server-computed, so
+it needs the restart-stable `time(nullptr) % (pathTime/1000)` that
+`Transport.cpp:112` uses), while a type-11 GO sends raw
+`WorldTimer::getMSTime()` as a seed the client's own loop rides. Client and
+server therefore reset together on restart, and wall-clock is never sent for
+these objects. "Be consistent with `Transport::Create`" is a false analogy.
+Leave `GetAnimationTime()` keyed off `getMSTime()`.
+
+*Two real issues were bundled into the same finding, and neither is fixed:*
+
+1. **~49.7-day wrap.** `LocalTransport.cpp:137` computes
+   `(getMSTime() + EpochOffset) % TotalTime`. Unsigned wraparound is defined, so
+   this is not UB, but keying phase off a wrapping 32-bit uptime counter gives a
+   phase discontinuity every ~49.7 days, and adding `EpochOffset` shifts where
+   it lands. Clients advance their own seeded copy and do not wrap at the same
+   instant, so the mirror desyncs until each client receives a fresh create
+   block, dragging passengers to an unrelated point in the loop.
+2. **The calibration recipe stores the wrong value.** The migration (lines
+   31–34) and the `epoch_offset` column comment both instruct the operator to
+   record `getMSTime() % TotalTime` at a known end. Since phase is
+   `(getMSTime() + EpochOffset) % TotalTime`, the value that puts the car at
+   keyframe `T_end` is `(T_end − observed) mod TotalTime`. Following the
+   instructions as written silently miscalibrates every entry. This artifact's
+   own recipe (lines 63–66) is under-specified the same way, so citing it does
+   not settle this half — fix the artifact's recipe too.
+
+Neither requires redoing the implementation. Fix those two, then ship the branch;
+the in-game phase measurement remains outstanding by design and belongs in a
+follow-up artifact, not here.
+
 Worktree left at
 `D:/CodingProjects/tortoise-wow/tortoise-wow/.claude/worktrees/wf_5873c415-d92-1`,
 branch `backlog/generic-transport-base-and-localtransport` (never pushed, so

@@ -11,7 +11,7 @@ file each tick.
 
 ```markdown
 ---
-status: pending        # pending | in-progress | done | failed
+status: pending        # pending | in-progress | done | failed | out-of-scope
 risk: low               # low | medium | high — informational, not a gate
 area: playerbots/battlegrounds
 ---
@@ -50,6 +50,15 @@ tables — what breaks, under what load, traced to what.
   error — then fix the artifact and reset it to `pending`. If the failed attempt
   had already pushed its branch, delete it from `origin` as well, or the retry's
   push is rejected as non-fast-forward.
+- **out-of-scope** — a human reviewed a `failed` attempt and accepted that the
+  work cannot be done here as scoped: it needs a environment, data or decision
+  this repo does not have. Not a retry candidate and not a defect to chase; the
+  artifact stays as a record of what was ruled out and why. Because drain's
+  two-consecutive-failure circuit breaker only counts artifacts whose
+  frontmatter still reads `failed`, moving one here also clears it from the
+  breaker — which is the intended way to accept a failure and let a future
+  drain run continue past it. If the work should happen later under different
+  conditions, scope that as a **new** artifact rather than reopening this one.
 
 ## Producing artifacts
 

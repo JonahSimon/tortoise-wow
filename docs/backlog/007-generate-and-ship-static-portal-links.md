@@ -1,5 +1,5 @@
 ---
-status: failed
+status: out-of-scope
 risk: medium
 area: playerbots/transport
 ---
@@ -39,6 +39,13 @@ custom portal hub, none of its portals are reachable by bots.
 is a data migration, not just a code change — validate the generated rows on
 a scratch DB (row counts, no duplicate/self-referencing nodes) before
 committing them.
+
+**Accepted as out of scope** (2026-08-12): reviewed after the drain marked this
+`failed`, and the block is correct — this cannot be done from this repo. Not a
+retry candidate. If portal routing is wanted later, scope a new artifact that
+runs against a real scratch server with a world DB and a built core, and that
+does not forbid generating a node set for map 42. Original failure detail
+follows.
 
 **Failure notes:** blocking findings not addressed — acceptance criteria 3 and
 4 (ship a SQL migration under `sql/database_updates/`, with validated row
