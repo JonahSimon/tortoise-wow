@@ -904,6 +904,26 @@ void TravelPath::makeShortCut(WorldPosition startPos, float maxDist, Unit* bot)
     return;
 }
 
+//Is this the ground-side point of a dock hop? That is the first NODE_TRANSPORT point of a transport
+//sequence, with the point where the vehicle docks right behind it. makeDockNode stamps the
+//transport's entry on the dock hop, so a dock point can no longer be told apart from a ride point by
+//a zero entry. Both dock-hop points must still be walked through, the way they were when the hop
+//carried entry 0, so that getNextPoint stops on the vehicle's docking position and hands
+//UseTransport that position rather than the pier the hop starts from (ClosestCorrectPoint puts the
+//pier up to 20 yards away, well outside the INTERACTION_DISTANCE gate UseTransport applies).
+static bool isDockHopEntryPoint(std::vector<PathNodePoint>::iterator beg, std::vector<PathNodePoint>::iterator ed, std::vector<PathNodePoint>::iterator p)
+{
+    if (p->type != PathNodeType::NODE_TRANSPORT)
+        return false;
+
+    if (p == beg || std::prev(p)->type == PathNodeType::NODE_TRANSPORT) //We are already inside a transport sequence.
+        return false;
+
+    auto nextP = std::next(p);
+
+    return nextP != ed && nextP->type == PathNodeType::NODE_TRANSPORT;
+}
+
 bool TravelPath::shouldMoveToNextPoint(WorldPosition startPos, std::vector<PathNodePoint>::iterator beg, std::vector<PathNodePoint>::iterator ed, std::vector<PathNodePoint>::iterator p, float& moveDist, float maxDist)
 {
     if (p == ed) //We are the end. Stop now.
@@ -933,14 +953,16 @@ bool TravelPath::shouldMoveToNextPoint(WorldPosition startPos, std::vector<PathN
         return false; //Use the teleport
     }
 
-    //We are almost at a transport node. Move to the node before this.   
-    if (nextP->type == PathNodeType::NODE_TRANSPORT && nextP->entry)
+    //We are almost at a transport node. Move to the node before this.
+    if (nextP->type == PathNodeType::NODE_TRANSPORT && nextP->entry
+        && !isDockHopEntryPoint(beg, ed, nextP) //Keep walking, the dock itself is next.
+        && !isDockHopEntryPoint(beg, ed, p))    //We are on the dock, move on to where the vehicle stops.
     {
         return false;
     }
-    
+
     //We are moving to a transport node.
-    if (p->type == PathNodeType::NODE_TRANSPORT && p->entry)
+    if (p->type == PathNodeType::NODE_TRANSPORT && p->entry && !isDockHopEntryPoint(beg, ed, p))
     {
         if (nextP->type != PathNodeType::NODE_TRANSPORT && p != beg && std::prev(p)->type != PathNodeType::NODE_TRANSPORT) //We are not using the transport. Skip it.
             return true;
@@ -2362,7 +2384,7 @@ void TravelNodeMap::generatePortalNodes()
     }
 }
 
-void TravelNodeMap::makeDockNode(TravelNode* node, WorldPosition pos, std::string dockName)
+void TravelNodeMap::makeDockNode(TravelNode* node, WorldPosition pos, std::string dockName, uint32 transportEntry)
 {
     pos.loadMapAndVMap(0);
     WorldPosition exitPos = pos;
@@ -2375,7 +2397,9 @@ void TravelNodeMap::makeDockNode(TravelNode* node, WorldPosition pos, std::strin
         {
             exitNode = sTravelNodeMap.addNode(exitPos, node->getName() + dockName, true, false);
 
-            TravelNodePath travelPath(exitPos.distance(pos), 0.1f, (uint8)TravelNodePathType::transport, 0, true); //The path is part of the transport.
+            //The path is part of the transport. Carry the transport entry on the dock hop too:
+            //with 0 here UseTransport is called with entry 0 and has to scan every gameobject on the map.
+            TravelNodePath travelPath(exitPos.distance(pos), 0.1f, (uint8)TravelNodePathType::transport, transportEntry, true);
             travelPath.setComplete(true);
             travelPath.setPath({ exitPos, pos });
             exitNode->setPathTo(node, travelPath, true);
@@ -2454,7 +2478,7 @@ void TravelNodeMap::generateTransportNodes()
                                 if (data->displayId == 455) //Undervator
                                     exitPos.setZ(exitPos.getZ() - 0.46f);
 
-                                makeDockNode(node, exitPos, "entry");
+                                makeDockNode(node, exitPos, "entry", entry);
 
                                 if (!prevNode)
                                 {
@@ -2506,7 +2530,7 @@ void TravelNodeMap::generateTransportNodes()
                                     if (data->displayId == 455) //Undervator
                                         exitPos.setZ(exitPos.getZ() - 0.46f);
 
-                                    makeDockNode(node, exitPos, "entry");
+                                    makeDockNode(node, exitPos, "entry", entry);
 
                                     if (node != prevNode) {
                                         if (p.second->TimeSeg < timeStart)
@@ -2556,7 +2580,7 @@ void TravelNodeMap::generateTransportNodes()
                         else if (data->displayId == 7087) //Moonspray
                             exitPos.setZ(exitPos.getZ() + 4.88f);
 
-                        makeDockNode(node, exitPos, "dock");
+                        makeDockNode(node, exitPos, "dock", entry);
 
                         if (!prevNode)
                         {
