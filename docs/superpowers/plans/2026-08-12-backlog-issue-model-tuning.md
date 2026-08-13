@@ -67,6 +67,7 @@ artifact afterwards.
 | 3 | `003-honour-usetaxi-return-in-minimalmove` | low | 6 | 233,953 | 111 | 11m52s | PR #11, 2 files, +42/−2 |
 | 4 | `004-worldposition-gettransports-guid-bug` | low | 6 | 264,943 | 156 | 18m39s | PR #12, 4 files, +130/−18 |
 | 5 | `005-implement-ontaxiflighteject` | low | 6 | 339,121 | 151 | 21m41s | PR #13, 2 files, +57/−4 |
+| 6 | `006-boat-walk-on-guard-and-stale-transport` | medium | 5 | 246,434 | 114 | 14m56s | PR #14, 2 files, +12/−6 |
 
 Observations from the untuned run, all five ticks nominally `risk: low`:
 
@@ -78,6 +79,13 @@ Observations from the untuned run, all five ticks nominally `risk: low`:
   flagged "low-but-touches-core" for changing `Player` taxi-flight state.
 - Tick 1 carries first-visit orientation cost that later ticks don't, so it is a
   poor single point of comparison for a tuned run.
+- The first `medium` tick (6) came in cheaper than three of the five `low` ticks,
+  which further weakens the risk label as a cost predictor.
+- Agent count per tick is 5 or 6, not fixed: the fix agent runs only when a
+  review lens returns findings to address. Tick 6 was the first 5-agent tick.
+  This matters for tuning — dropping the lenses to `medium` effort changes how
+  often the fix agent fires, so lens effort and fix-agent frequency have to be
+  read together rather than as independent savings.
 
 If per-artifact escalation is implemented, core proximity looks like the better
 signal to escalate on than either the risk label or expected diff size. That may
