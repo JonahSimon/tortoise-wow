@@ -66,6 +66,23 @@ artifact afterwards.
 | 2 | `002-taxi-cost-check-both-endpoints` | low | 6 | 224,143 | 95 | 10m41s | PR #10, 3 files, +34/−8 |
 | 3 | `003-honour-usetaxi-return-in-minimalmove` | low | 6 | 233,953 | 111 | 11m52s | PR #11, 2 files, +42/−2 |
 | 4 | `004-worldposition-gettransports-guid-bug` | low | 6 | 264,943 | 156 | 18m39s | PR #12, 4 files, +130/−18 |
+| 5 | `005-implement-ontaxiflighteject` | low | 6 | 339,121 | 151 | 21m41s | PR #13, 2 files, +57/−4 |
+
+Observations from the untuned run, all five ticks nominally `risk: low`:
+
+- Cost does not track the `risk:` label — these five span 224k–339k tokens and
+  10m41s–21m41s while carrying the same label.
+- Nor does it track diff size. Tick 5 was the most expensive (339k) with nearly
+  the smallest diff (+57/−4); tick 4 produced the largest diff (+130/−18) for
+  75k fewer tokens. What tick 5 had was core proximity — its artifact was
+  flagged "low-but-touches-core" for changing `Player` taxi-flight state.
+- Tick 1 carries first-visit orientation cost that later ticks don't, so it is a
+  poor single point of comparison for a tuned run.
+
+If per-artifact escalation is implemented, core proximity looks like the better
+signal to escalate on than either the risk label or expected diff size. That may
+warrant a `touches-core:` field in the artifact format rather than overloading
+`risk:`.
 
 The comparison worth making is tokens-per-tick at equal outcome quality: did the
 tuned run still produce a PR that survives review without extra round trips?
