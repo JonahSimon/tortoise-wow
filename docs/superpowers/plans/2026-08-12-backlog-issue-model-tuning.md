@@ -70,6 +70,7 @@ artifact afterwards.
 | 6 | `006-boat-walk-on-guard-and-stale-transport` | medium | 5 | 246,434 | 114 | 14m56s | PR #14, 2 files, +12/−6 |
 | 7 | `007-generate-and-ship-static-portal-links` | medium | 4 | 328,479 | 182 | 29m13s | **failed** — unsatisfiable ACs, no PR |
 | 8 | `008-dock-hops-carry-transport-entry` | medium | 6 | 496,141 | 217 | 42m08s | PR #15, 6 files, +255/−150 |
+| 9 | `009-generic-transport-base-and-localtransport` | high | 4 | 729,696 | 393 | 69m27s | **failed** — disputed finding, no PR |
 
 Observations from the untuned run, all five ticks nominally `risk: low`:
 
@@ -111,6 +112,38 @@ dropping the lenses to `medium`, weigh that against the token savings: the revie
 stage is where this workflow's autonomy is actually load-bearing, because nothing
 downstream re-checks whether the acceptance criteria were honestly met. Consider
 downgrading `verify` and `PR` first and leaving the lenses alone.
+
+### Full-run totals (untuned, Opus high on all agents)
+
+Nine ticks: **7 PRs opened, 2 failed at the review gate**, ~3.12M subagent
+tokens, 1,552 tool uses, ~3h55m of wall clock. Cost climbed with the ordering
+(the two most expensive ticks were the last two), which tracks the artifacts
+getting harder rather than any drift in the loop.
+
+### Both failures were review-gate deadlocks, and that is the real finding
+
+Neither failure was a bad implementation. Tick 7 failed because acceptance
+criteria were unsatisfiable in this environment; tick 9 failed because the
+implementer judged a review finding to be a misdiagnosis, argued the case from
+the core's own wire format, and declined to change the code. In both cases the
+workflow did the safe thing — fail closed, open no PR.
+
+But there is no tiebreaker. When implementer and reviewer disagree, the workflow
+cannot tell "correct code blocked by a wrong finding" from "bad code correctly
+blocked", so both outcomes look identical from outside: `success: false`, work
+stranded on an unpushed branch. That has a direct bearing on the tuning question
+in both directions:
+
+- Weakening the lenses raises false blocks, which costs throughput, not just
+  safety — every false block strands a full implementation.
+- Strengthening them does not fix the deadlock either; a stronger lens can still
+  be wrong about a specific claim.
+
+The structural fix is not a model tier. It is either an explicit adjudication
+step for disputed findings, or letting the implementer's rebuttal ride along in
+a PR marked as contested so a human resolves it at review — which is where this
+workflow is supposed to put decisions anyway. Worth considering before spending
+effort on lens tiers.
 
 The comparison worth making is tokens-per-tick at equal outcome quality: did the
 tuned run still produce a PR that survives review without extra round trips?
