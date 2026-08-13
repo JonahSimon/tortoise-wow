@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 risk: low
 area: playerbots/transport
 ---
@@ -41,3 +41,5 @@ fix alone does **not** make elevators or the Deeprun Tram boardable — that
 also requires a server-side transport type for GO type 11 (see the separate
 `LocalTransport` backlog artifact) — but it makes the lookup correct and
 removes the per-tick full-map scan regardless.
+
+**Result:** PR opened at https://github.com/ChrisMiho/tortoise-wow/pull/12
