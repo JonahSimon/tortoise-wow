@@ -18,9 +18,17 @@ mid-flight can never start its next flight-path hop.
 **Acceptance criteria:**
 - `OnTaxiFlightEject` actually clears an in-progress taxi flight: clears taxi
   destinations (`m_taxi.ClearTaxiDestinations()`), expires the current
-  movement generator, clears `UNIT_STAT_TAXI_FLIGHT`, removes
-  `UNIT_FLAG_TAXI_FLIGHT | UNIT_FLAG_DISABLE_MOVE`, and — when `force` is
-  true — sets fall information at the bot's current position.
+  movement generator, clears `UNIT_STAT_TAXI_FLIGHT` and removes
+  `UNIT_FLAG_TAXI_FLIGHT | UNIT_FLAG_DISABLE_MOVE` (`force` additionally
+  resets the movement stack and re-runs the flag teardown if anything is
+  left behind).
+- Fall information ends up **cleared** (`SetFallInformation(0, 0.0f)`), not
+  armed at the bot's current position. This fork's `Player::IsFalling()` is
+  just `m_fallStartZ != 0`, `PlayerbotAI::CanMove()` refuses to move a
+  falling bot, and no client sends the landing packet that would clear it
+  for a bot — so a non-zero start Z would strand the bot at flight altitude
+  (e.g. the `PlayerbotAI::Reset()` eject, which has no follow-up flight) and
+  arm full-altitude fall damage in `Player::HandleFall`.
 - `OnTaxiFlightEject` is a no-op when the player/bot is not currently flying
   (`!IsTaxiFlying()`), so real players' in-progress flights are unaffected
   when the method is called defensively.
