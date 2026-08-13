@@ -28,10 +28,10 @@
 #include <cstdio>
 
 // === Type renames ===
-// cmangos's Transport class is called GenericTransport in WotLK builds and
-// Transport in Classic. Penqle uses Transport. Provide both names.
-class Transport;
-typedef Transport GenericTransport;
+// GenericTransport is a real base class here (src/game/Transports/GenericTransport.h), matching
+// cmangos: GenericTransport -> Transport (MO transports) and LocalTransport (GO type 11). The old
+// `typedef Transport GenericTransport` made every dynamic_cast in the bot module fail for
+// elevators and trams, because a type-11 gameobject was never a Transport.
 
 // cmangos's CreatureAI base is named UnitAI; Penqle uses CreatureAI. Same shape.
 class CreatureAI;
@@ -728,19 +728,10 @@ struct CmangosTaxiNodesStoreProxy
 };
 inline CmangosTaxiNodesStoreProxy sTaxiNodesStore;
 
-// === TransportAnimation stub (cmangos has TransportAnim.dbc; Penqle doesn't) ===
-struct TransportAnimationNode {
-    uint32 TimeIndex = 0;
-    uint32 TimeSeg = 0;
-    float X = 0, Y = 0, Z = 0;
-};
-struct TransportAnimation {
-    // cmangos uses a time-keyed map of pointers (so iterators yield (uint32, TransportAnimationNode*) pairs).
-    std::map<uint32, TransportAnimationNode*> Path;
-    uint32 TotalTime = 0;
-};
-typedef std::map<uint32, TransportAnimationNode*> TransportPathContainer;
-// Note: Penqle has its own sTransportMgr; we extend TransportMgr inline (see Transports/TransportMgr.h).
+// === TransportAnimation ===
+// cmangos reads this from TransportAnim.dbc, which 1.12 client data does not have. The core owns
+// the types now (src/game/Transports/TransportMgr.h) and loads them from the `transport_animation`
+// world table, so sTransportMgr.GetTransportAnimInfo() returns real data for elevators and trams.
 
 // === sLootMgr shim (cmangos global; Penqle has LootStore but no equivalent singleton) ===
 // Bot calls sLootMgr.GetLoot(player[, guid]) to fetch the loot the player is currently looking at.

@@ -19,49 +19,27 @@
 #ifndef TRANSPORTS_H
 #define TRANSPORTS_H
 
-#include "GameObject.h"
+#include "GenericTransport.h"
 #include "TransportMgr.h"
-#include "MapManager.h"
 
 struct CreatureData;
 
-class Transport : public GameObject
+class Transport : public GenericTransport
 {
         friend Transport* TransportMgr::CreateTransport(uint32, uint32);
 
         Transport();
     public:
-        typedef std::set<WorldObject*> PassengerSet;
-
         ~Transport() override;
 
         void AddToWorld() override;
         void RemoveFromWorld() override;
 
         bool Create(uint32 guidlow, uint32 entry, uint32 mapid, float x, float y, float z, float ang, uint32 animprogress);
-        void CleanupsBeforeDelete() override;
 
         void Update(uint32 update_diff, uint32 /*time_diff*/) override;
 
         void BuildUpdate(UpdateDataMapType& data_map);
-
-        void AddPassenger(WorldObject* passenger);
-        // cmangos passes a 2nd bool (advised, ignored).
-        void AddPassenger(WorldObject* passenger, bool /*advised*/) { AddPassenger(passenger); }
-        void RemovePassenger(WorldObject* passenger);
-        PassengerSet const& GetPassengers() const { return _passengers; }
-
-        /// This method transforms supplied transport offsets into global coordinates
-        void CalculatePassengerPosition(float& x, float& y, float& z, float* o = nullptr) const
-        {
-            CalculatePassengerPosition(x, y, z, o, GetPositionX(), GetPositionY(), GetPositionZ(), GetOrientation());
-        }
-
-        /// This method transforms supplied global coordinates into local offsets
-        void CalculatePassengerOffset(float& x, float& y, float& z, float* o = nullptr) const
-        {
-            CalculatePassengerOffset(x, y, z, o, GetPositionX(), GetPositionY(), GetPositionZ(), GetOrientation());
-        }
 
         uint32 GetPathProgress() const { return _pathProgress; }
         uint32 GetPeriod() const { return GetUInt32Value(GAMEOBJECT_LEVEL); }
@@ -69,47 +47,27 @@ class Transport : public GameObject
 
         KeyFrameVec const& GetKeyFrames() const { return _transportInfo->keyFrames; }
 
-        void UpdatePosition(float x, float y, float z, float o);
+        void UpdatePosition(float x, float y, float z, float o) override;
 
         TransportTemplate const* GetTransportTemplate() const { return _transportInfo; }
 
-        static void CalculatePassengerPosition(float& x, float& y, float& z, float* o, float transX, float transY, float transZ, float transO)
-        {
-            float inx = x, iny = y, inz = z;
-            if (o)
-                *o = MapManager::NormalizeOrientation(transO + *o);
-
-            x = transX + inx * std::cos(transO) - iny * std::sin(transO);
-            y = transY + iny * std::cos(transO) + inx * std::sin(transO);
-            z = transZ + inz;
-        }
-
-        static void CalculatePassengerOffset(float& x, float& y, float& z, float* o, float transX, float transY, float transZ, float transO)
-        {
-            if (o)
-                *o = MapManager::NormalizeOrientation(*o - transO);
-
-            z -= transZ;
-            y -= transY;    // y = searchedY * std::cos(o) + searchedX * std::sin(o)
-            x -= transX;    // x = searchedX * std::cos(o) + searchedY * std::sin(o + pi)
-            float inx = x, iny = y;
-            y = (iny - inx * std::tan(transO)) / (std::cos(transO) + std::sin(transO) * std::tan(transO));
-            x = (inx + iny * std::tan(transO)) / (std::cos(transO) + std::sin(transO) * std::tan(transO));
-        }
-        void UpdatePassengerPosition(WorldObject* object);
         void SendOutOfRangeUpdateToMap();
         void SendCreateUpdateToMap();
         void RemoveMapReference(Map* pMap) { m_maps.erase(pMap); }
 
         //! Helper to know if a stop frame was reached, ie. the vessel is docked.
         //! Public so callers can avoid stepping onto a vessel still under way.
-        bool IsMoving() const { return _isMoving; }
+        bool IsMoving() const override { return _isMoving; }
+
+    protected:
+        // An MO transport is added to every continent instance of its current map at once, so
+        // "same map as the passenger" means "one of the maps we are on".
+        bool SharesMapWith(WorldObject const* passenger) const override { return m_maps.find(passenger->FindMap()) != m_maps.end(); }
 
     private:
         void MoveToNextWaypoint();
         float CalculateSegmentPos(float perc);
         bool TeleportTransport(uint32 newMapid, float x, float y, float z, float o);
-        void UpdatePassengerPositions(PassengerSet& passengers);
         void DoEventIfAny(KeyFrame const& node, bool departure);
 
         void SetMoving(bool val) { _isMoving = val; }
@@ -121,9 +79,6 @@ class Transport : public GameObject
         ShortTimeTracker _positionChangeTimer;
         bool _isMoving;
         bool _pendingStop;
-
-        PassengerSet _passengers;
-        PassengerSet::iterator _passengerTeleportItr;
 
         uint32 _pathProgress;
         std::unordered_set<Map*> m_maps;

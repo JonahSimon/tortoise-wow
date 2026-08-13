@@ -667,6 +667,7 @@ class Unit;
 class GameObjectAI;
 class GameObjectModel;
 class Transport;
+class GenericTransport;
 
 struct GameObjectDisplayInfoEntry;
 
@@ -684,7 +685,16 @@ class GameObject : public WorldObject
         void AddToWorld() override;
         void RemoveFromWorld() override;
 
-        bool Create(uint32 guidlow, uint32 name_id, Map *map, float x, float y, float z, float ang, float rotation0, float rotation1, float rotation2, float rotation3, uint32 animprogress, GOState go_state);
+        // Allocates the right class for a `gameobject_template` entry: GAMEOBJECT_TYPE_TRANSPORT
+        // (11) needs a LocalTransport so it can move and carry passengers server-side; everything
+        // else is a plain GameObject. Every site that spawns a template-driven gameobject must go
+        // through this instead of `new GameObject`.
+        static GameObject* CreateGameObject(uint32 name_id);
+        // Same, for the spawn paths that only know the `gameobject` table guid up front and
+        // resolve the template inside LoadFromDB.
+        static GameObject* CreateGameObjectForSpawn(uint32 db_guid);
+
+        virtual bool Create(uint32 guidlow, uint32 name_id, Map *map, float x, float y, float z, float ang, float rotation0, float rotation1, float rotation2, float rotation3, uint32 animprogress, GOState go_state);
         void Update(uint32 update_diff, uint32 p_time) override;
         GameObjectInfo const* GetGOInfo() const { return m_goInfo; }
 
@@ -877,6 +887,11 @@ class GameObject : public WorldObject
         uint64 GetRotation() const { return m_rotation; }
         Transport* ToTransport() { if (GetGOInfo()->type == GAMEOBJECT_TYPE_MO_TRANSPORT) return reinterpret_cast<Transport*>(this); else return nullptr; }
         Transport const* ToTransport() const { if (GetGOInfo()->type == GAMEOBJECT_TYPE_MO_TRANSPORT) return reinterpret_cast<Transport const*>(this); else return nullptr; }
+        // Either kind of transport: an MO transport (boat, zeppelin) or a LocalTransport
+        // (elevator, lift, tram car). Checked, not assumed from the template type, because a
+        // type-11 template spawned outside GameObject::CreateGameObject is a plain GameObject.
+        GenericTransport* ToGenericTransport();
+        GenericTransport const* ToGenericTransport() const;
 
         bool IsVisible() const { return m_visible; }
         void SetVisible(bool b);

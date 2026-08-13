@@ -2002,6 +2002,8 @@ void LoadPlayerEggLoot();
     sObjectMgr.LoadGameobjectInfo();
     sLog.outString("Loading transport templates...");
     sTransportMgr.LoadTransportTemplates();
+    sLog.outString("Loading transport animations...");
+    sTransportMgr.LoadTransportAnimations();                 // must be after LoadGameobjectInfo
     sLog.outString("Loading spell chains...");
     sSpellMgr.LoadSpellChains();
     sLog.outString("Loading spell elixirs...");

@@ -1298,7 +1298,7 @@ void WorldObject::CleanupsBeforeDelete()
 {
     RemoveFromWorld();
 
-    if (Transport* transport = GetTransport())
+    if (GenericTransport* transport = GetTransport())
         transport->RemovePassenger(this);
 }
 
@@ -3304,7 +3304,7 @@ void WorldObject::MonsterSayToPlayer(int32 textId, Unit const* target) const
     ((Player*)target)->GetSession()->SendPacket(&data);
 }
 
-void WorldObject::GetPosition(float &x, float &y, float &z, Transport* t) const
+void WorldObject::GetPosition(float &x, float &y, float &z, GenericTransport* t) const
 {
     if (t && m_movementInfo.t_guid == t->GetObjectGuid())
     {
