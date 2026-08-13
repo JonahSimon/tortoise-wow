@@ -916,22 +916,52 @@ with the four call sites updated to pass `entry` (`TravelNode.cpp:2454`, `:2506`
 makeDockNode(node, exitPos, "entry", entry);
 ```
 
-Because the shipped store is never regenerated, the equivalent correction must also be applied
-to the seeded rows — a data migration under `sql/database_updates/`:
+Because the shipped store is never regenerated, the equivalent correction has to reach the seeded
+rows as well — and a migration under `sql/database_updates/` cannot be the primary carrier of it.
+`INSTALL-LINUX.md` applies every migration before the PlayerBots module's own SQL is imported, so
+the `UPDATE` runs against a table that does not exist yet, gets recorded as applied, and is never
+retried; and the module's seed file DROPs and recreates the table, which would reset the fix
+anyway. So the 135 resolvable dock-hop rows are corrected **in the seed file itself**
+(`src/modules/PlayerBots/sql/world/classic/ai_playerbot_travel_nodes.sql`), e.g. for the tram:
 
 ```sql
--- Dock hops were seeded with object = 0, forcing UseTransport() into a whole-map GO scan.
--- Copy the entry from the matching ride link on the same transport node.
+(1370, 1373, 3, 176084, 0.1, 0, 71.667, 1, 0, 0, 0),     -- ride, unchanged
+(1370, 1387, 3, 176084, 5.75507, 0, 0.1, 1, 0, 0, 0),    -- car -> platform, was object 0
+(1387, 1370, 3, 176084, 5.75507, 0, 0.1, 1, 0, 0, 0),    -- platform -> car, was object 0
+```
+
+The migration (`sql/database_updates/20260812120000_world.sql`) still ships, for databases seeded
+from an older copy of the store, but it is guarded so it no-ops when the table is absent rather
+than burning its one attempt:
+
+```sql
 UPDATE `ai_playerbot_travelnode_link` AS dock
 JOIN (
     SELECT `node_id`, MAX(`object`) AS `entry`
     FROM `ai_playerbot_travelnode_link`
     WHERE `type` = 3 AND `object` <> 0
     GROUP BY `node_id`
-) AS ride ON ride.`node_id` = dock.`to_node_id`
+) AS ride ON ride.`node_id` IN (dock.`node_id`, dock.`to_node_id`)
 SET dock.`object` = ride.`entry`
 WHERE dock.`type` = 3 AND dock.`object` = 0;
 ```
+
+Joining on either endpoint in one statement, rather than one statement per direction, keeps the
+result independent of statement order: exactly one endpoint of a dock hop is a transport node, so
+at most one ride link matches. 12 of the 147 seeded dock hops touch a transport node with no ride
+link at all (single-stop elevators, plus one dock node that acquired a dock node of its own) and
+keep `object = 0`.
+
+**One consequence in the movement code.** The dock hop's `object = 0` was doing double duty: it was
+also the marker that let `shouldMoveToNextPoint` walk *through* both dock-hop points and stop on
+the position where the vehicle docks (`TravelNode.cpp:934`, `:940` both test `entry` before
+stopping). With the entry filled in, those tests fire two points early, `UpcommingSpecialMovement`
+hands `UseTransport` the pier instead of the docking position, and the 2D `INTERACTION_DISTANCE`
+gate at `MovementActions.cpp:491` — measured against the transport's own position, while
+`ClosestCorrectPoint` places the pier up to 20 yards away — never opens. So both tests now carve
+out the dock hop's ground-side point explicitly (`isDockHopEntryPoint`), which restores the
+original stopping behaviour while the entry rides along. Rows that legitimately keep `object = 0`
+are unaffected, since the carve-out only matters once `entry` is non-zero.
 
 Finally, once `LocalTransport` exists, set `AiPlayerbot.TransportTeleportType = 0` so bots walk
 into the car and ride it rather than teleporting dock to dock.

@@ -162,6 +162,15 @@ is the vanilla set; the `tbc` and `wotlk` siblings do not apply here. Anything
 under `sql/other` is maintenance — deleting and resetting bots — not part of a
 first install.
 
+These files import last, after the migrations above, and each one DROPs and
+recreates its table. So a migration in `sql/database_updates` can never durably
+change a `ai_playerbot_*` table on a first install: it runs before the table
+exists, gets recorded as applied anyway, and the import that follows would reset
+it regardless. Corrections to the seeded travel-node store therefore live in
+`world/classic/ai_playerbot_travel_nodes.sql` itself, and the matching migrations
+are written to no-op when the table is absent — they exist only for databases
+seeded from an older copy of that file.
+
 
 > **Caveat.** The auto-updater only works on a database built through it from the
 > start. On one restored from a full dump the `migrations` table does not line up
