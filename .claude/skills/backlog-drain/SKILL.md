@@ -24,6 +24,7 @@ artifact before turning this loose on a real backlog — see
      `in-progress`, and still `pending` (with paths, so they can be picked up
      — or, for `in-progress`, investigated — again later).
    - Delete `docs/backlog/.stop`.
+   - Run step 9a (the worktree-isolation branch sweep).
    - Call `ScheduleWakeup({ stop: true })` and stop. Do not pick a new item.
 2. List `docs/backlog/*.md`. Read each file's frontmatter. If any file has
    `status: in-progress`, it's left over from a previous tick that crashed or
@@ -64,6 +65,7 @@ artifact before turning this loose on a real backlog — see
      their paths, so they can be triaged), how many are stuck `in-progress`
      (with paths, same human-check caveat as step 2), and that the backlog is
      drained.
+   - Run step 9a (the worktree-isolation branch sweep).
    - Call `ScheduleWakeup({ stop: true })` and stop. Do not continue.
 5. Otherwise, pick the file with the lowest numeric prefix among those with
    `status: pending` (ignoring any files without a valid 3-digit `NNN-`
@@ -209,6 +211,48 @@ artifact before turning this loose on a real backlog — see
      to pending)`. If you already wrote that note without the path, edit the
      line now to add it. If no worktree exists for that branch, say that
      instead.
+9a. Sweep orphaned Workflow-isolation branches. Every Implement-phase call
+    creates a scaffold branch named `worktree-wf_*` before the agent checks
+    out `backlog/<slug>` inside that worktree — once that happens, the
+    scaffold branch is never referenced again, but nothing deletes it, so it
+    accumulates one stale local branch per tick regardless of outcome. Run
+    this after step 9's own cleanup, every tick, terminal or not:
+
+    ```
+    git branch --list 'worktree-wf_*'
+    git worktree list --porcelain
+    ```
+
+    For each `worktree-wf_*` branch **not** shown as backing any entry in
+    `git worktree list`, check whether it's safe to delete before deleting
+    it — its tip must be reachable from somewhere else, or deleting it loses
+    the only copy of whatever it holds:
+
+    ```
+    git merge-base --is-ancestor <branch tip> origin/cm-main
+    ```
+
+    or, for each local `backlog/*` branch still present:
+
+    ```
+    git merge-base --is-ancestor <branch tip> backlog/<slug>
+    ```
+
+    If either check exits `0`, the branch's content lives on elsewhere —
+    delete it: `git branch -D <branch>`. If neither does, **do not delete
+    it** — report its name and note that it holds at least one commit
+    unreachable from `cm-main` or any live `backlog/*` branch, so a human can
+    look before it's lost. (This is exactly what happened to
+    `worktree-wf_6d15c61b-144-1` in the first real run: a stray merge-conflict
+    resolution commit that survived nowhere else. Content from that specific
+    incident is safe — it landed on `cm-main` via a different path — but the
+    branch itself was never verified reachable before this sweep existed.)
+
+    This sweep also runs as the last action before either terminal-tick exit
+    (`docs/backlog/.stop` present, or no `pending` artifacts remain) and
+    before the circuit-breaker stop — not only during an ordinary tick — so a
+    drain session that halts early still leaves the repo swept rather than
+    accumulating scaffold branches across every future session.
 10. Unless step 8 took the systemic path, stage and commit the artifact's
     status change with a subject in exactly this form — step 3's circuit
     breaker reads it back:
