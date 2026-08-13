@@ -128,9 +128,11 @@ Leave `GetAnimationTime()` keyed off `getMSTime()`.
    `(getMSTime() + EpochOffset) % TotalTime`. Unsigned wraparound is defined, so
    this is not UB, but keying phase off a wrapping 32-bit uptime counter gives a
    phase discontinuity every ~49.7 days, and adding `EpochOffset` shifts where
-   it lands. Clients advance their own seeded copy and do not wrap at the same
-   instant, so the mirror desyncs until each client receives a fresh create
-   block, dragging passengers to an unrelated point in the loop.
+   it lands. The server-side discontinuity is certain and drags passengers to an
+   unrelated point in the loop. Whether the client tracks that jump is an
+   inference, not a verified fact — we have no 1.12 client source here — but a
+   client advancing its own seeded copy would not wrap at the same instant, so
+   the likely result is a desync until each client receives a fresh create block.
 2. **The calibration recipe stores the wrong value.** The migration (lines
    31–34) and the `epoch_offset` column comment both instruct the operator to
    record `getMSTime() % TotalTime` at a known end. Since phase is
