@@ -266,6 +266,7 @@ if (returnedReviews.length < lenses.length) {
 const allFindings = returnedReviews.flatMap((r) => r.findings || [])
 const blocking = allFindings.filter((f) => f.severity === 'blocking')
 const minor = allFindings.filter((f) => f.severity === 'minor')
+let contestedFindings = null
 if (blocking.length > 0) {
   const fixResult = await agent(
     `On branch "${branchName}", fix these blocking review findings, then amend
@@ -276,15 +277,19 @@ if (blocking.length > 0) {
      commit on that branch. If any of them can't or shouldn't be fixed
      (contradictory acceptance criteria, out of scope, not a real defect),
      return fixed: false and put one entry per unfixed finding in unresolved,
-     each saying which finding it is and why it wasn't fixed. Do not report
-     fixed: true with caveats — this run only proceeds to a PR on fixed: true.`,
+     each saying which finding it is and, specifically, WHY you believe it's
+     wrong or shouldn't be fixed -- this rebuttal goes verbatim into the PR
+     body for a human to adjudicate, so make the actual argument, not just
+     "disagreed". Do not report fixed: true with caveats.`,
     { phase: 'Review', label: 'apply-fixes', schema: FIX_SCHEMA }
   )
-  if (!fixResult || fixResult.fixed !== true) {
-    const unresolved = fixResult && Array.isArray(fixResult.unresolved) && fixResult.unresolved.length > 0
-      ? fixResult.unresolved.join('; ')
-      : describe(fixResult)
-    return { success: false, reason: `blocking findings not addressed: ${unresolved}`, branchName }
+  const hasRebuttal = fixResult && Array.isArray(fixResult.unresolved) && fixResult.unresolved.length > 0
+  if (!fixResult || (fixResult.fixed !== true && !hasRebuttal)) {
+    // No usable result at all -- not a defensible disagreement, a broken fix attempt.
+    return { success: false, reason: `blocking findings not addressed: ${describe(fixResult)}`, branchName }
+  }
+  if (fixResult.fixed !== true) {
+    contestedFindings = fixResult.unresolved
   }
 }
 
@@ -324,6 +329,15 @@ const minorSection = minor.length > 0
 ${minor.map((f) => `      - ${f.file}: ${f.summary}`).join('\n')}`
   : ''
 
+const contestedSection = contestedFindings
+  ? `
+   ${minorSection ? '8' : '7'}. A section headed "Contested — needs manual adjudication", explaining
+      that a review finding and the implementer disagreed and neither could be
+      resolved automatically, then listing exactly these and nothing else, one
+      bullet per line:
+${contestedFindings.map((u) => `      - ${u}`).join('\n')}`
+  : ''
+
 const prResult = await agent(
   `Push branch "${branchName}" to origin, then open a pull request for it
    against base branch ${BASE_BRANCH}. Branch refs are shared across
@@ -335,7 +349,7 @@ const prResult = await agent(
    instead of this fork, and avoid relying on whichever branch happens to be
    checked out where you're running).
 
-   Title: a short summary of the fix, in this repo's existing commit-message voice.
+   Title: ${contestedFindings ? '"[contested] " followed by a' : 'a'} short summary of the fix, in this repo's existing commit-message voice.
 
    Body must include, in this order:${stackedSection}
    1. The backlog artifact this implements: ${artifactLabel}
@@ -343,7 +357,7 @@ const prResult = await agent(
    3. Summary of the change made: ${implemented.summary}
    4. Acceptance criteria, quoted verbatim: "${implemented.acceptanceCriteria}"
    5. This verification note, verbatim: "${verifyNote || 'not available'}"
-   6. A line stating manual in-game testing is still required before merge${minorSection}
+   6. A line stating manual in-game testing is still required before merge${contestedSection}${minorSection}
 
    Return the URL of the pull request you opened, and nothing else in that field.
    If you could not push or could not open the PR, say so in prUrl rather than
@@ -363,4 +377,6 @@ if (!PR_URL_PATTERN.test(trimmedPrUrl)) {
   }
 }
 
-return { success: true, branchName, prUrl: trimmedPrUrl }
+return contestedFindings
+  ? { success: true, contested: true, branchName, prUrl: trimmedPrUrl }
+  : { success: true, branchName, prUrl: trimmedPrUrl }

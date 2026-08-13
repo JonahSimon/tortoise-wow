@@ -123,8 +123,14 @@ artifact before turning this loose on a real backlog — see
    see [Systemic vs. per-artifact failures](#systemic-vs-per-artifact-failures)
    for how to tell the last two apart:
    - **Success** — `success: true` **and** a `prUrl` present:
-     - Edit the artifact's frontmatter to `status: done`.
-     - Append a `**Result:** PR opened at <prUrl>` line to the artifact body.
+     - If `contested` is **not** `true`: edit the artifact's frontmatter to
+       `status: done` and append a `**Result:** PR opened at <prUrl>` line.
+     - If `contested` **is** `true`: edit the artifact's frontmatter to
+       `status: contested` instead, and append
+       `**Result:** PR opened at <prUrl> — contested, see the PR's "Contested"
+       section for the disputed finding.` A contested outcome is not a
+       failure — do not count it toward the circuit breaker in step 3, and do
+       not treat it as a per-artifact or systemic failure below.
    - **Per-artifact failure** — `success: false` with a reason that's about
      this issue's own implementation, review, or PR:
      - Edit the artifact's frontmatter to `status: failed`.
@@ -204,7 +210,10 @@ artifact before turning this loose on a real backlog — see
     breaker reads it back:
     `backlog: mark <artifact filename without .md> <done|failed>`, e.g.
     `git add docs/backlog/003-bots-stuck-at-spirit-healer.md && git commit -m
-    "backlog: mark 003-bots-stuck-at-spirit-healer done"`.
+    "backlog: mark 003-bots-stuck-at-spirit-healer done"`. For a contested
+    outcome, use `backlog: mark <artifact filename without .md> contested` —
+    step 3's circuit breaker only matches subjects ending in `failed`, so this
+    form is already exempt without further changes there.
 11. If the outcome you just recorded was `failed`, re-run step 3's check now
     (it now includes this tick's commit). If it trips, report as step 3
     describes and call `ScheduleWakeup({ stop: true })` instead of scheduling
