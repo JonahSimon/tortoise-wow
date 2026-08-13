@@ -29,6 +29,7 @@
 #include "InstanceData.h"
 #include "GridNotifiersImpl.h"
 #include "Transport.h"
+#include "LocalTransport.h"
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "World.h"
@@ -763,6 +764,24 @@ inline void Map::UpdateCells(uint32 map_diff)
     unitsMvtUpdate.clear();
 }
 
+// Drag the passengers of every occupied local transport (elevator, lift, tram car) along its
+// animation. These objects stay linked in the cell they were spawned in, so the cell visits above
+// only reach them while a player happens to stand near that one cell - a bot riding a tram car down
+// the tunnel would freeze mid-ride. Nothing happens for an unoccupied one; it is not in the list.
+void Map::UpdateCarryingTransports()
+{
+    // Relocating a passenger can drop it off the transport, which edits the list, so work on a copy.
+    std::vector<LocalTransport*> occupied;
+    {
+        std::unique_lock<std::mutex> lock(_carryingTransports_lock);
+        if (_carryingTransports.empty())
+            return;
+        occupied.assign(_carryingTransports.begin(), _carryingTransports.end());
+    }
+
+    for (const auto transport : occupied)
+        transport->MovePassengers();
+}
 
 void Map::ProcessSessionPackets(PacketProcessing type)
 {
@@ -892,6 +911,7 @@ void Map::Update(uint32 t_diff)
     uint32 playersUpdateTime = WorldTimer::getMSTimeDiffToNow(updateMapTime) - sessionsUpdateTime;
 
     UpdateCells(t_diff);
+    UpdateCarryingTransports();
     uint32 activeCellsUpdateTime = WorldTimer::getMSTimeDiffToNow(updateMapTime) - playersUpdateTime - sessionsUpdateTime;
 
     // Send world objects and item update field changes

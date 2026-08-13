@@ -45,16 +45,34 @@ class GenericTransport : public GameObject
         virtual void RemovePassenger(WorldObject* passenger);
         PassengerSet const& GetPassengers() const { return _passengers; }
 
+        // The pose passengers are carried at, i.e. the frame both offset transforms below are
+        // relative to. An MO transport is not registered in a grid cell and really does move
+        // itself, so its own position is that pose. A LocalTransport must stay parked where it is
+        // linked into the grid and reports the pose the animation says it is at instead - see
+        // LocalTransport.h for why. Anything that needs "where do I put a passenger" must go
+        // through here rather than reading GetPosition* off a transport.
+        virtual void GetCarryPosition(float& x, float& y, float& z, float& o) const
+        {
+            x = GetPositionX();
+            y = GetPositionY();
+            z = GetPositionZ();
+            o = GetOrientation();
+        }
+
         /// This method transforms supplied transport offsets into global coordinates
         void CalculatePassengerPosition(float& x, float& y, float& z, float* o = nullptr) const
         {
-            CalculatePassengerPosition(x, y, z, o, GetPositionX(), GetPositionY(), GetPositionZ(), GetOrientation());
+            float tx, ty, tz, to;
+            GetCarryPosition(tx, ty, tz, to);
+            CalculatePassengerPosition(x, y, z, o, tx, ty, tz, to);
         }
 
         /// This method transforms supplied global coordinates into local offsets
         void CalculatePassengerOffset(float& x, float& y, float& z, float* o = nullptr) const
         {
-            CalculatePassengerOffset(x, y, z, o, GetPositionX(), GetPositionY(), GetPositionZ(), GetOrientation());
+            float tx, ty, tz, to;
+            GetCarryPosition(tx, ty, tz, to);
+            CalculatePassengerOffset(x, y, z, o, tx, ty, tz, to);
         }
 
         static void CalculatePassengerPosition(float& x, float& y, float& z, float* o, float transX, float transY, float transZ, float transO)
@@ -86,6 +104,13 @@ class GenericTransport : public GameObject
 
         // Move the server's copy of the transport and drag its passengers along. Does not touch
         // GAMEOBJECT_POS_*, so it never generates an update packet.
+        //
+        // Only valid for a transport that is not linked into a grid cell (an MO transport lives in
+        // Map::_transports, not in the grid): this relocates with bare WorldObject::Relocate, and
+        // this core has no GameObject grid relocation, so a grid object moved this way would stay
+        // linked in the cell it was spawned in - invisible to grid searches at its real position,
+        // updated only while somebody stands near its old cell, and removed from the wrong cell by
+        // Map::Remove. LocalTransport overrides this to refuse for exactly that reason.
         virtual void UpdatePosition(float x, float y, float z, float o);
 
     protected:

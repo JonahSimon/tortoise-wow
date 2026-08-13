@@ -71,6 +71,7 @@ class GridMap;
 class WeatherSystem;
 class Transport;
 class GenericTransport;
+class LocalTransport;
 
 namespace VMAP
 {
@@ -368,6 +369,7 @@ class Map : public GridRefManager<NGridType>
         inline void UpdateActiveCellsAsynch(uint32 now, uint32 diff);
         inline void UpdateActiveCellsCallback(uint32 diff, uint32 now, uint32 threadId, uint32 totalThreads, uint32 step);
         inline void UpdateCells(uint32 diff);
+        void UpdateCarryingTransports();
         void UpdateSync(const uint32);
         void UpdatePlayers();
         void DoUpdate(uint32 maxDiff);
@@ -526,6 +528,23 @@ class Map : public GridRefManager<NGridType>
         void AddToActive(WorldObject* obj);
         // must called with RemoveFromWorld
         void RemoveFromActive(WorldObject* obj);
+
+        // Local transports (elevators, lifts, tram cars) that currently carry a passenger. They
+        // stay linked in the cell they were spawned in but have to drag their passengers wherever
+        // those have got to, so they are driven from Map::Update instead of from cell visits, which
+        // only happen while a player is near that one cell. Registered by LocalTransport itself
+        // while it has passengers - which can happen from a worker thread during the multithreaded
+        // cell update, hence the lock.
+        void AddCarryingTransport(LocalTransport* transport)
+        {
+            std::unique_lock<std::mutex> lock(_carryingTransports_lock);
+            _carryingTransports.insert(transport);
+        }
+        void RemoveCarryingTransport(LocalTransport* transport)
+        {
+            std::unique_lock<std::mutex> lock(_carryingTransports_lock);
+            _carryingTransports.erase(transport);
+        }
 
         void SetSummonLimitForObject(uint64 guid, uint32 limit);
         uint32 GetSummonLimitForObject(uint64 guid) const;
@@ -743,6 +762,9 @@ class Map : public GridRefManager<NGridType>
         // Objects that must update even in inactive grids without activating them
         typedef std::set<Transport*> TransportsContainer;
         TransportsContainer _transports;
+        // Occupied local transports; see AddCarryingTransport.
+        mutable std::mutex _carryingTransports_lock;
+        std::set<LocalTransport*> _carryingTransports;
         bool m_unloading = false;
         bool m_crashed = false;
         bool m_updateFinished = false;

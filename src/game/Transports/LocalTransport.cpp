@@ -18,66 +18,126 @@
 
 #include "LocalTransport.h"
 #include "TransportMgr.h"
+#include "Map.h"
 #include "Log.h"
 #include "Timer.h"
 #include <iterator>
 #include <algorithm>
+#include <cmath>
 
 bool LocalTransport::Create(uint32 guidlow, uint32 name_id, Map* map, float x, float y, float z, float ang, float rotation0, float rotation1, float rotation2, float rotation3, uint32 animprogress, GOState go_state)
 {
     if (!GameObject::Create(guidlow, name_id, map, x, y, z, ang, rotation0, rotation1, rotation2, rotation3, animprogress, go_state))
         return false;
 
-    // The animation offsets are relative to the spawn pose, which never changes - GAMEOBJECT_POS_*
-    // keeps holding it, so this is also the position every real client animates from.
-    _stationary = Position(x, y, z, ang);
-
+    // GameObject::Create has recorded the spawn pose in m_stationaryPosition. That pose is what
+    // every real client animates the model from, and the animation offsets are relative to it.
     _animation = sTransportMgr.GetTransportAnimInfo(name_id);
     if (!_animation)
-        DETAIL_LOG("LocalTransport %u (%s) has no `transport_animation` rows; it will stay parked server-side.", name_id, GetName());
+        DETAIL_LOG("LocalTransport %u (%s) has no `transport_animation` rows; it will carry passengers at its spawn pose.", name_id, GetName());
 
     return true;
 }
 
-void LocalTransport::Update(uint32 update_diff, uint32 time_diff)
+void LocalTransport::RemoveFromWorld()
 {
-    GameObject::Update(update_diff, time_diff);
+    // Must not be left in the map's carry list with a dangling pointer.
+    if (Map* map = FindMap())
+        map->RemoveCarryingTransport(this);
 
-    if (!_animation || !_animation->TotalTime)
-        return;
-
-    if (_passengers.empty())
-        return;   // nothing to carry - do not burn cycles on an unobserved lift
-
-    RefreshPosition();
-
-    UpdatePassengerPositions(_passengers);
-}
-
-void LocalTransport::RefreshPosition()
-{
-    if (!_animation || !_animation->TotalTime)
-        return;
-
-    float x, y, z;
-    ComputePositionAt((WorldTimer::getMSTime() + _animation->EpochOffset) % _animation->TotalTime, x, y, z);
-
-    // Relocate() moves the server's copy without touching GAMEOBJECT_POS_*, so no update packet
-    // is generated and real clients are unaffected. This mirrors Transport::UpdatePosition.
-    Relocate(x, y, z, _stationary.o);
-    UpdateModelPosition();
+    GameObject::RemoveFromWorld();
 }
 
 void LocalTransport::AddPassenger(WorldObject* passenger)
 {
-    // The boarding offset is measured against our position, so make sure it is the position the
-    // animation says we are at right now and not wherever we were when the last rider left.
-    RefreshPosition();
-
     GenericTransport::AddPassenger(passenger);
+
+    if (_passengers.find(passenger) == _passengers.end())
+        return;
+
+    // A passenger picks its boarding point off the parked model (the only pose the collision model
+    // and every grid search know about), so a boarding that happens while the mirror says we are
+    // somewhere else means the phase is not calibrated for this entry yet. The ride itself is still
+    // consistent - the offset below is measured against the same pose it will be re-applied to, so
+    // the passenger does not jump - but it rides the animation's displacement from the wrong point.
+    // This is the in-game calibration signal; see LocalTransport.h.
+    float const offsetDist = GetAnimationOffsetDistance();
+    if (offsetDist > 2.0f)
+        DEBUG_LOG("LocalTransport %u (%s) boarded %s while its animation mirror is %.1f yards from the spawn pose - phase not calibrated?",
+                  GetEntry(), GetName(), passenger->GetName(), offsetDist);
+
+    // While anything is aboard we have to drag it every tick, wherever it has got to. The cell we
+    // are registered in is only visited while a player happens to be near it, so the map drives us
+    // directly instead. An entry with no animation never moves anybody, so it is not worth a tick.
+    if (_animation && _animation->TotalTime)
+        if (Map* map = FindMap())
+            map->AddCarryingTransport(this);
 }
 
-void LocalTransport::ComputePositionAt(uint32 msTime, float& x, float& y, float& z) const
+void LocalTransport::RemovePassenger(WorldObject* passenger)
+{
+    GenericTransport::RemovePassenger(passenger);
+
+    if (_passengers.empty())
+        if (Map* map = FindMap())
+            map->RemoveCarryingTransport(this);
+}
+
+void LocalTransport::MovePassengers()
+{
+    if (!IsInWorld() || _passengers.empty())
+        return;
+
+    UpdatePassengerPositions(_passengers);
+}
+
+void LocalTransport::UpdatePosition(float /*x*/, float /*y*/, float /*z*/, float /*o*/)
+{
+    // A LocalTransport is an ordinary grid gameobject: relocating it would leave it linked in the
+    // cell it was spawned in, and would drag its collision model away from where clients draw it.
+    // Passengers are carried through GetCarryPosition() instead.
+    sLog.outError("[TRANSPORTS] LocalTransport %u (%s) cannot be moved with UpdatePosition; it is a grid object.", GetEntry(), GetName());
+}
+
+void LocalTransport::GetCarryPosition(float& x, float& y, float& z, float& o) const
+{
+    x = GetStationaryX();
+    y = GetStationaryY();
+    z = GetStationaryZ();
+    o = GetStationaryO();
+
+    if (!_animation || !_animation->TotalTime || _animation->Path.empty())
+        return;
+
+    float dx, dy, dz;
+    ComputeOffsetAt(GetAnimationTime(), dx, dy, dz);
+
+    // The animation offsets are in the object's local frame; rotate into world space by the spawn
+    // orientation. This is the same transform generateTransportNodes uses.
+    x += std::cos(o) * dx - std::sin(o) * dy;
+    y += std::sin(o) * dx + std::cos(o) * dy;
+    z += dz;
+}
+
+float LocalTransport::GetAnimationOffsetDistance() const
+{
+    if (!_animation || !_animation->TotalTime || _animation->Path.empty())
+        return 0.0f;
+
+    float dx, dy, dz;
+    ComputeOffsetAt(GetAnimationTime(), dx, dy, dz);
+
+    return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+uint32 LocalTransport::GetAnimationTime() const
+{
+    // getMSTime() is the clock the client's own loop is seeded with (see LocalTransport.h), so the
+    // mirror and the client stay in phase across restarts without any wall-clock anchoring.
+    return (WorldTimer::getMSTime() + _animation->EpochOffset) % _animation->TotalTime;
+}
+
+void LocalTransport::ComputeOffsetAt(uint32 msTime, float& dx, float& dy, float& dz) const
 {
     // The keyframe at TotalTime closes the loop and msTime is always below it, so there is always
     // a keyframe strictly after msTime to interpolate towards.
@@ -94,13 +154,7 @@ void LocalTransport::ComputePositionAt(uint32 msTime, float& x, float& y, float&
     float t = float(int64(msTime) - int64(prev->second->TimeSeg)) / float(span);
     t = std::min(std::max(t, 0.0f), 1.0f);
 
-    float dx = prev->second->X + (next->second->X - prev->second->X) * t;
-    float dy = prev->second->Y + (next->second->Y - prev->second->Y) * t;
-    float dz = prev->second->Z + (next->second->Z - prev->second->Z) * t;
-
-    // The animation offsets are in the object's local frame; rotate into world space by the
-    // spawn orientation. This is the same transform generateTransportNodes uses.
-    x = _stationary.x + std::cos(_stationary.o) * dx - std::sin(_stationary.o) * dy;
-    y = _stationary.y + std::sin(_stationary.o) * dx + std::cos(_stationary.o) * dy;
-    z = _stationary.z + dz;
+    dx = prev->second->X + (next->second->X - prev->second->X) * t;
+    dy = prev->second->Y + (next->second->Y - prev->second->Y) * t;
+    dz = prev->second->Z + (next->second->Z - prev->second->Z) * t;
 }

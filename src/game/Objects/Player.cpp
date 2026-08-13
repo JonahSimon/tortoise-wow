@@ -18266,7 +18266,11 @@ bool Player::SaveToDB(bool online, bool force, bool direct)
     uberInsert.addFloat(finiteAlways(m_movementInfo.GetTransportPos().y));
     uberInsert.addFloat(finiteAlways(m_movementInfo.GetTransportPos().z));
     uberInsert.addFloat(MapManager::NormalizeOrientation(finiteAlways(m_movementInfo.GetTransportPos().o)));
-    if (m_transport)
+    // Only an MO transport guid is worth persisting: LoadFromDB resolves this column through
+    // HashMapHolder<Transport>, and an unresolvable value teleports the character to its homebind.
+    // A LocalTransport (elevator, lift, tram car) is an ordinary grid gameobject that does not exist
+    // when the character loads, so those keep the plain world position saved above instead.
+    if (m_transport && m_transport->GetObjectGuid().IsMOTransport())
         uberInsert.addUInt32(m_transport->GetGUIDLow());
     else
         uberInsert.addUInt32(0);
