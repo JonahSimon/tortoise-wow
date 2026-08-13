@@ -1,5 +1,5 @@
 ---
-status: pending
+status: failed
 risk: medium
 area: playerbots/transport
 ---
@@ -39,3 +39,37 @@ custom portal hub, none of its portals are reachable by bots.
 is a data migration, not just a code change — validate the generated rows on
 a scratch DB (row counts, no duplicate/self-referencing nodes) before
 committing them.
+
+**Failure notes:** blocking findings not addressed — acceptance criteria 3 and
+4 (ship a SQL migration under `sql/database_updates/`, with validated row
+counts and an observed bot routing through a portal) are not satisfiable as
+scoped, and the reviewer judged them unsatisfiable with the shipped world data
+at all:
+
+- The shipped data spawns only two teleporting spellcaster GOs — 176296
+  "Portal to Stormwind" (guid 5007923) and 176499 "Portal to Orgrimmar" (guid
+  5007924), both on map 42 (`sql/base/tw_world_gameobject.sql`) — while the
+  shipped node store
+  (`src/modules/PlayerBots/sql/world/classic/ai_playerbot_travel_nodes.sql`)
+  has **zero** nodes on map 42. A generated portal entrance node therefore has
+  no same-map node to build a walk path to or from, and no bot can reach it.
+  Making it routable requires generating a node set for map 42, which is the
+  full `gen node` regeneration that acceptance criterion 1 explicitly forbids.
+- Producing and validating the delta needs a world DB, a built core, and a
+  mysql client. None exist in this tree (no compiler either), and
+  `saveNodeStore` renumbers every node id on each save, so the delta cannot be
+  hand-written against the current dump. Committing hand-derived, unvalidated
+  INSERTs would contradict this artifact's own note above.
+
+The remaining findings (2–5) were fixed, and the evidence plus a
+recommendation to re-scope AC 3/4 into a separate item run against a real
+scratch server is recorded in commit `bb5aa26` on the failed branch.
+
+Worktree left at
+`D:/CodingProjects/tortoise-wow/tortoise-wow/.claude/worktrees/wf_aaf838b7-624-1`,
+branch `backlog/generate-and-ship-static-portal-links` (never pushed to
+origin, so `bb5aa26` exists only there — read it with
+`git -C <worktree> show bb5aa26` before discarding). Remove both with
+`git worktree remove <path>` and `git branch -D
+backlog/generate-and-ship-static-portal-links` before resetting this artifact
+to pending.
