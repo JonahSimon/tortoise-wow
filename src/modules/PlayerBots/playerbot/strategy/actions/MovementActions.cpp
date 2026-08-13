@@ -319,8 +319,6 @@ bool MovementAction::MoveOnTransport(PlayerbotAI* ai, GenericTransport* transpor
 
     uint32 radius = 20;
 
-    GenericTransport* botTrans = bot->GetTransport();
-
     std::vector<WorldPosition> path;
 
     WorldPosition transPos = botPos.RandomPointOnTrans(transport, 20.0f, doTeleport ? nullptr : bot, path);
@@ -335,8 +333,6 @@ bool MovementAction::MoveOnTransport(PlayerbotAI* ai, GenericTransport* transpor
         bot->SendHeartBeat();
         return true;
     }
-
-    bot->SetTransport(botTrans);
 
     if (path.empty())
     {
@@ -490,6 +486,14 @@ bool MovementAction::UseTransport(PlayerbotAI* ai, uint32 entry, WorldPosition d
 
     if (transport && dockPosition.mapid == bot->GetMapId() && dockPosition.sqDistance2d(transport) < INTERACTION_DISTANCE * INTERACTION_DISTANCE)
     {
+        // Walking aboard a vessel that has not stopped at the dock lands the bot in the water.
+        if (!doTeleport && transport->IsMoving())
+        {
+            ai->TellDebug(ai->GetMaster(), "Waiting for transport " + transportName + " to stop before boarding.", "debug move");
+
+            return false;
+        }
+
         MoveOnTransport(ai, transport, doTeleport);
 
         return true;
