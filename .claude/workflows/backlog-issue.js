@@ -9,6 +9,12 @@ export const meta = {
   ],
 }
 
+// Review lenses run at medium effort by default (see
+// docs/superpowers/plans/2026-08-12-backlog-issue-model-tuning.md) — but keep
+// the session's full tier for artifacts with risk: high, where a mid-tier
+// lens is more likely to miss a subtle finding. There is no automated
+// escalation yet; a human editing this file for a high-risk drain run should
+// drop the effort override for that run.
 const REVIEW_SCHEMA = {
   type: 'object',
   properties: {
@@ -157,6 +163,15 @@ const implemented = await agent(
    commit style (run "git log --oneline -20" first to match the voice).
    Do not push and do not open a PR — a later phase does that.
 
+   If this fix requires a new SQL migration under sql/database_updates/,
+   generate its filename with sql/touch_migration.sh (or sql/make_migration.bat
+   on Windows) to get a real UTC timestamp — do not hand-write a timestamp.
+   Then rename the resulting file to insert this artifact's number before the
+   suffix: <timestamp>_${artifactLabel.match(/(\d{3})-/)?.[1] || 'XXX'}_world.sql
+   instead of <timestamp>_world.sql. This guarantees uniqueness even if
+   another tick generates a migration with the same timestamp — the artifact
+   number differs by construction.
+
    Return:
    - the exact branch name you created
    - a one-paragraph summary of the change you made
@@ -212,7 +227,7 @@ const reviews = await parallel(lenses.map((lens) => () =>
      Report every real finding with a one-sentence summary, the file it's in,
      and a severity of "blocking" or "minor". Return an empty findings array
      if there's nothing to flag.`,
-    { phase: 'Review', label: `review:${lens.key}`, schema: REVIEW_SCHEMA }
+    { phase: 'Review', label: `review:${lens.key}`, schema: REVIEW_SCHEMA, effort: 'medium' }
   )
 ))
 
@@ -259,7 +274,7 @@ const verifyNote = await agent(
    Report whether the build succeeded. If no toolchain is available, or a build isn't
    reasonably feasible here, say so plainly rather than implying it compiles. Keep the
    answer to 2-3 sentences — it goes verbatim into a PR description.`,
-  { phase: 'Verify', label: 'verify' }
+  { phase: 'Verify', label: 'verify', model: 'sonnet', effort: 'low' }
 )
 
 phase('PR')
@@ -301,7 +316,7 @@ const prResult = await agent(
    Return the URL of the pull request you opened, and nothing else in that field.
    If you could not push or could not open the PR, say so in prUrl rather than
    inventing a URL — the caller checks that it is a real GitHub PR URL.`,
-  { phase: 'PR', label: 'open-pr', schema: PR_SCHEMA }
+  { phase: 'PR', label: 'open-pr', schema: PR_SCHEMA, model: 'sonnet', effort: 'low' }
 )
 
 // Without this check any truthy text -- including "I couldn't create the PR
