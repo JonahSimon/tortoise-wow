@@ -134,7 +134,21 @@ uint32 LocalTransport::GetAnimationTime() const
 {
     // getMSTime() is the clock the client's own loop is seeded with (see LocalTransport.h), so the
     // mirror and the client stay in phase across restarts without any wall-clock anchoring.
-    return (WorldTimer::getMSTime() + _animation->EpochOffset) % _animation->TotalTime;
+    //
+    // Both terms are reduced before they are added: getMSTime() + EpochOffset would wrap uint32
+    // EpochOffset milliseconds *before* the tick counter itself does, putting the mirror at an
+    // unrelated point in the loop - and dragging its passengers there - up to ~49.7 days earlier
+    // than it has any reason to.
+    //
+    // The counter's own ~49.7-day wrap still moves the phase by (2^32 % TotalTime), because 2^32 is
+    // not a whole number of loops. That one is inherent to riding a wrapping 32-bit counter and is
+    // not fixable here: the client is seeded from this same counter, so which side jumps, and
+    // whether they jump together, depends on client behaviour we cannot read. Verify it in the same
+    // in-game pass that measures EpochOffset - a server up for more than 49 days is the case to
+    // watch - rather than "fixing" it blind against a 64-bit clock no client ever sees.
+    uint32 const period = _animation->TotalTime;
+
+    return ((WorldTimer::getMSTime() % period) + (_animation->EpochOffset % period)) % period;
 }
 
 void LocalTransport::ComputeOffsetAt(uint32 msTime, float& dx, float& dy, float& dz) const

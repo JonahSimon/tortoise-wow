@@ -28,14 +28,22 @@ CREATE TABLE `transport_animation` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COLLATE=utf8mb3_unicode_ci ROW_FORMAT=DYNAMIC COMMENT='Client-side transport model animation, server mirror';
 
 -- Where in the loop the *client* thinks a given entry is at server time 0. This cannot be
--- derived from static data: it has to be measured in-game once per entry (park a GM next to a
--- car and log `WorldTimer::getMSTime() % TotalTime` at the moment it reaches a known end), per
+-- derived from static data: it has to be measured in-game once per entry, per
 -- docs/playerbots/BOT-TRANSPORT-INVESTIGATION.md (D3, "Calibration caveat"). Until an entry is
 -- measured its offset is 0 and a bot rides a car that is out of phase with what players see.
+--
+-- To measure one: park a GM next to a car and, at the instant it reaches the end corresponding to
+-- keyframe `time_seg` = t_end, log m = `WorldTimer::getMSTime() % TotalTime`. The server phase is
+-- (getMSTime() + epoch_offset) % TotalTime, so store
+--
+--     epoch_offset = (t_end + TotalTime - m) % TotalTime
+--
+-- and NOT the raw m - that is only correct when t_end is 0, and otherwise leaves the entry
+-- miscalibrated by t_end.
 DROP TABLE IF EXISTS `transport_animation_phase`;
 CREATE TABLE `transport_animation_phase` (
   `entry` mediumint(8) unsigned NOT NULL,
-  `epoch_offset` int(10) unsigned NOT NULL DEFAULT 0 COMMENT 'ms into the loop at server time 0; measured in-game',
+  `epoch_offset` int(10) unsigned NOT NULL DEFAULT 0 COMMENT 'ms into the loop at server time 0; measured in-game as (t_end + TotalTime - observed) % TotalTime',
   PRIMARY KEY (`entry`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3 COLLATE=utf8mb3_unicode_ci ROW_FORMAT=DYNAMIC COMMENT='Measured animation phase per transport_animation entry';
 
@@ -251,8 +259,9 @@ INSERT INTO `transport_animation` (`entry`, `time_seg`, `x`, `y`, `z`) VALUES
 (20655, 11833, 0, 0,   96.5014),
 (20655, 16667, 0, 0,    0.0000);
 
--- Every seeded entry starts uncalibrated. Measure each one in-game and UPDATE its epoch_offset;
--- until then a bot-ridden car is in the right place along the right path, at the wrong time.
+-- Every seeded entry starts uncalibrated. Measure each one in-game and UPDATE its epoch_offset
+-- using the formula in this table's header comment - not the raw logged value; until then a
+-- bot-ridden car is in the right place along the right path, at the wrong time.
 INSERT INTO `transport_animation_phase` (`entry`, `epoch_offset`) VALUES
 (176080, 0), (176081, 0), (176082, 0), (176083, 0), (176084, 0), (176085, 0),
 (4170, 0), (4171, 0), (47296, 0), (47297, 0), (11898, 0), (11899, 0),

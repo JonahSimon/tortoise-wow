@@ -110,7 +110,9 @@ struct TransportAnimation
     uint32 TotalTime = 0;
     // Where in the loop the *client* thinks the model is at server time 0. Measured in-game per
     // entry (see docs/playerbots/BOT-TRANSPORT-INVESTIGATION.md, D3 calibration) and stored in
-    // `transport_animation_phase`; 0 until an entry has been calibrated.
+    // `transport_animation_phase`; 0 until an entry has been calibrated. Note the stored value is
+    // (t_end + TotalTime - observed) % TotalTime, not the raw observed getMSTime() % TotalTime -
+    // see LocalTransport.h and the migration's table comment.
     uint32 EpochOffset = 0;
 };
 

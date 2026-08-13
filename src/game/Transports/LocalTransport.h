@@ -57,8 +57,18 @@
 // Transport::Create is: getMSTime() is the clock both ends share, and it is re-seeded per client
 // on every create block, so it survives a server restart. TransportAnimation::EpochOffset then
 // only has to absorb the difference between where our seeded keyframe table starts and where the
-// client's own animation data starts - a per-entry constant that has to be measured in-game (park
-// a GM next to a car, log getMSTime() % TotalTime as it reaches a known end) and is 0 until it is.
+// client's own animation data starts - a per-entry constant that has to be measured in-game and is
+// 0 until it is.
+//
+// Measuring it: park a GM next to a car, and at the instant it reaches the end that corresponds to
+// keyframe TimeSeg t_end, log m = getMSTime() % TotalTime. The phase this class uses is
+// (getMSTime() + EpochOffset) % TotalTime, so the value to store is not m itself but what makes
+// that phase come out at t_end:
+//
+//     epoch_offset = (t_end + TotalTime - m) % TotalTime
+//
+// Storing the raw m instead only happens to be right when t_end is 0, and otherwise miscalibrates
+// the entry by t_end.
 class LocalTransport : public GenericTransport
 {
     public:
