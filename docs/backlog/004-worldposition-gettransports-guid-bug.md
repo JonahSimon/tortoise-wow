@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 risk: low
 area: playerbots/transport
 ---
@@ -52,3 +52,5 @@ also requires a server-side transport type for GO type 11 (see the separate
 `LocalTransport` backlog artifact) — but it makes the lookup correct
 regardless. The per-tick full-map scan is left in place and re-scoped to
 artifact 010; see that artifact for why a radius bound cannot fix it.
+
+**Result:** PR opened at https://github.com/ChrisMiho/tortoise-wow/pull/12

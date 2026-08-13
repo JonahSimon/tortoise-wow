@@ -272,5 +272,5 @@ walking away: every non-dry-run tick pushes a branch and opens a PR.
   was already opened for it before resetting its `status` to `pending` by
   hand, and clean up its worktree and branch first, exactly as for `failed`.
 - Branches are independent — each is cut fresh from
-  `origin/playerbots-integration-gh` when its tick starts, never from another
+  `origin/cm-main` when its tick starts, never from another
   backlog branch.

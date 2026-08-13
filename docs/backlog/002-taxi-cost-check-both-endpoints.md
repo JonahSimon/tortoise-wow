@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 risk: low
 area: playerbots/transport
 ---
@@ -46,3 +46,5 @@ to talk to, and therefore never learns the node it was teleported onto.
 Independently shippable, but pairs naturally with the `T3` fix (honour
 `UseTaxi`'s return value) and the `T2` fix (`OnTaxiFlightEject`) — together
 they cover reliable flight-path travel.
+
+**Result:** PR opened at https://github.com/ChrisMiho/tortoise-wow/pull/10

@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 risk: low
 area: playerbots/transport
 ---
@@ -39,3 +39,5 @@ mid-flight can never start its next flight-path hop.
 Flagged low-but-touches-core because it changes `Player` taxi-flight state
 directly, even though the change itself is small and gated behind
 `IsTaxiFlying()`.
+
+**Result:** PR opened at https://github.com/ChrisMiho/tortoise-wow/pull/13

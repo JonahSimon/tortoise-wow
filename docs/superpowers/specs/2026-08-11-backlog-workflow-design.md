@@ -121,7 +121,7 @@ actively watching the conversation.
 ### Branch strategy
 
 Every issue's branch is cut independently from the current tip of
-`playerbots-integration-gh` at the moment that issue's tick starts — branches
+`cm-main` at the moment that issue's tick starts — branches
 are **not** stacked on each other's unmerged work. Rationale:
 
 - Artifacts are scoped to be independent problems, so most branches won't
@@ -135,12 +135,57 @@ are **not** stacked on each other's unmerged work. Rationale:
 "Done" means "PR opened," not "PR merged." The loop never waits on a human
 merge and never rebases anything.
 
+#### Field report: the first real drain, 2026-08-12
+
+Nine artifacts, eight PRs (#9–#16), integrated in
+`docs/superpowers/plans/2026-08-12-transport-stack-merge.md`. The rationale above
+held up on cost — four conflicts across eight PRs, minutes to resolve — but the
+prediction that they'd be "resolved by hand, not auto-reconciled" understated
+what the hand-resolution involves. Three things the design did not anticipate:
+
+1. **Every conflict was a silent-revert trap.** Because each branch is cut fresh
+   from `cm-main`, a later PR's branch carries *pre-fix* code for any file an
+   earlier PR repaired. #16 still held the `Map::GetTransports()` stub that #9
+   exists to delete; #16 held `IsMoving()` private, which #14 exists to make
+   public; #9 held the bare-spawn-id lookup that #12 exists to fix. Resolving any
+   of those toward the newer PR — the instinct, and what `-X theirs` does —
+   silently undoes finished work while looking like a clean merge. Conflicts here
+   are a **review hazard**, not just mechanical labour.
+2. **Stale-base implementation, which resolution does not fix.** #16 was designed
+   against a core where `GetTransports()` returns empty, i.e. where boats are
+   never found. Merging repairs the text; it does not re-derive a design that was
+   reasoned out against code that no longer exists. This is the deeper cost of
+   nine agents each believing they are the only change in flight.
+3. **Add/add collisions on generated filenames.** #15 and #16 independently
+   created `sql/database_updates/20260812120000_world.sql` — same timestamped
+   name, entirely different migrations. Nothing in the naming scheme prevents two
+   ticks on the same day from colliding.
+
+The independent-branch choice still earned its keep in the same run: `007` failed
+and was accepted as out-of-scope, and `009` failed its first pass. In a linear
+stack a dead link poisons everything above it, so those two failures would have
+forced a rebase of the chain; instead they cost the other PRs nothing.
+
+**Proposed change — targeted stacking, not blanket stacking.** Add a
+`depends-on:` field to the artifact frontmatter, and at tick start cut the branch
+from the dependency's branch when that dependency is still unmerged, otherwise
+from `cm-main`. The dependency information already exists in prose — 006 says it
+depends on the `GetTransports` fix landing first, 009 names 004 and 008 — so the
+drain is discarding something the scoping step already knew. Independent items
+keep their failure isolation; genuinely dependent ones get built on a real base.
+`backlog-scope` interviews for this today and just needs to write the field.
+
+The fully-serial alternative — gate each tick on the previous PR actually
+merging — eliminates both conflicts and stale bases, at the price of making
+throughput depend on review latency, which defeats running the drain unattended.
+Worth choosing deliberately rather than by default.
+
 ### Per-issue Workflow graph
 
 A named Workflow (`.claude/workflows/backlog-issue.js`), invoked by the drain
 skill as `Workflow({name: "backlog-issue", args: {artifactPath}})`:
 
-1. **Implement** — worktree-isolated, branch cut from `playerbots-integration-gh`.
+1. **Implement** — worktree-isolated, branch cut from `cm-main`.
    One agent implements the fix per the artifact's problem/cause/acceptance
    criteria.
 2. **Review** — the real safety net given no CI/tests exist. Parallel
@@ -152,7 +197,7 @@ skill as `Workflow({name: "backlog-issue", args: {artifactPath}})`:
    PR body rather than silently implying it compiles. Either way, the PR
    description flags manual in-game testing as the real verification gate,
    per `CONTRIBUTING.md`.
-4. **PR** — commit, push, `gh pr create` against `playerbots-integration-gh`,
+4. **PR** — commit, push, `gh pr create` against `cm-main`,
    referencing the artifact and its acceptance criteria.
 
 ## Packaging

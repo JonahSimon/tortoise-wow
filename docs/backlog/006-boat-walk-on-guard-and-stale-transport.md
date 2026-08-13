@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 risk: medium
 area: playerbots/transport
 ---
@@ -43,3 +43,5 @@ old vessel instead of the new one the bot just boarded.
 Depends on the `Map::GetTransports` stub fix landing first, or the bot never
 reaches this code path at all. Marked medium risk because it changes default
 boarding behavior for boats/zeppelins under the walk-on config mode.
+
+**Result:** PR opened at https://github.com/ChrisMiho/tortoise-wow/pull/14

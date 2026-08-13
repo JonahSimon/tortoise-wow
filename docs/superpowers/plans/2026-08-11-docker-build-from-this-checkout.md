@@ -20,12 +20,26 @@
 - **Ports:** auth `3724`, world `8095` (not the stock 8090), db `127.0.0.1:3309`. `WorldServerPort` in `mangosd.conf`, the published port, and the `tw_logon.realmlist.port` column must all read `8095`.
 - **Docker parallelism defaults to `-j2`.** The Docker VM has 4 CPUs and 8 GB RAM; higher parallelism risks the OOM killer mid-compile.
 - **All `docker` and `docker compose` commands run inside WSL Ubuntu**, never from Windows PowerShell, so relative bind-mount paths resolve consistently.
-- **Open an interactive WSL shell and run the commands there.** Do not wrap them as `wsl -d Ubuntu -- bash -lc '...'` from Git Bash: that path mangles `$(...)` substitutions. Verified — `ls /test | wc -l` returned `0` for a directory holding 11 entries, and reading a password file that way yielded an empty string and an `Access denied` error. Every command block below assumes this prompt:
+- **Crossing into WSL: two separate silent-corruption traps.** Both return plausible wrong output instead of failing, which is what makes them dangerous. Every command block below assumes an interactive prompt:
 
   ```bash
   wsl -d Ubuntu
   cd /mnt/d/CodingProjects/tortoise-wow/tortoise-wow
   ```
+
+  **Trap 1 — shell expansion is eaten.** `wsl -d Ubuntu -- bash -lc '...'` from Git Bash loses `$(...)` *and* plain `$var`. Verified twice: on 2026-08-11 `ls /test | wc -l` returned `0` for a directory holding 11 entries and a password read came back empty with `Access denied`; on 2026-08-12 a `for d in etc data logs` loop reported all three directories `MISSING` when all three existed and were populated — `$d` had expanded to nothing, so it was stat-ing the parent.
+
+  **Trap 2 — Git Bash rewrites Unix-looking paths (MSYS path conversion).** Any absolute `/...` argument gets the Git install root prepended. Verified 2026-08-12: `wsl ... bash /mnt/c/.../up.sh` became `C:/Program Files/Git/mnt/c/.../up.sh`, and `docker run --entrypoint /opt/turtle/bin/mangosd` became `C:/Program Files/Git/opt/turtle/bin/mangosd`. This one is not WSL-specific — it hits any command run from Git Bash, `docker` included.
+
+  **The recipe that works, and makes this automatable (verified 2026-08-12 — used to bring the stack up and to query the world DB):** put the commands in a **script file** and invoke it from **PowerShell**, not Git Bash:
+
+  ```powershell
+  wsl -d Ubuntu -- bash /mnt/c/path/to/script.sh
+  ```
+
+  PowerShell does no path rewriting, and a script file has no expansion crossing the boundary at all — variables expand inside WSL where they belong. An interactive shell is therefore *not* required. Two riders: `MSYS_NO_PATHCONV=1` fixes Trap 2 for a Git Bash one-liner but does **nothing** for Trap 1; and literal commands with no expansion do survive Git Bash → WSL intact (canary: a file count of 186 matched a native count), which is exactly why a canary without variables gives false confidence.
+
+- **`docker compose` writes progress to stderr.** Called from PowerShell, each line comes back wrapped as a `NativeCommandError` even when the command succeeds with exit 0. Judge success from `docker compose ps` / container status, not from the presence of those records.
 - **Mutating `git` operations for this repository run from Windows** (it is a Windows-owned checkout): commits, `reset`, `config`. Read-only queries from WSL are fine and are used deliberately in Tasks 2 and 3 — `git -c safe.directory='*' rev-parse --short HEAD` is verified working against `/mnt/d` (git 2.53.0). Only the *WSL* tree at `/home/deck/tortoise-wow-server-V2/src` is subject to the stricter "git only inside WSL" rule.
 
 ## Starting State (verified 2026-08-11)
