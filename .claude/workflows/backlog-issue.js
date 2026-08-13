@@ -26,6 +26,7 @@ const REVIEW_SCHEMA = {
           summary: { type: 'string' },
           file: { type: 'string' },
           severity: { type: 'string', enum: ['blocking', 'minor'] },
+          blocked: { type: 'boolean' },
         },
         required: ['summary', 'file', 'severity'],
       },
@@ -41,6 +42,8 @@ const IMPLEMENT_SCHEMA = {
     summary: { type: 'string' },
     problem: { type: 'string' },
     acceptanceCriteria: { type: 'string' },
+    blocked: { type: 'boolean' },
+    blockedReason: { type: 'string' },
   },
   required: ['branchName', 'summary', 'problem', 'acceptanceCriteria'],
 }
@@ -199,6 +202,15 @@ const implemented = await agent(
    another tick generates a migration with the same timestamp — the artifact
    number differs by construction.
 
+   If, after investigating, the artifact's acceptance criteria cannot be
+   satisfied in this environment -- missing data, missing tooling, a decision
+   only a human can make, not something any code change here can fix -- say
+   so plainly. Still create the branch (backlog-drain needs a real branch
+   name back either way), but make no commit, return blocked: true, and put
+   a specific explanation in blockedReason. Do not fabricate data or write a
+   partial implementation to make the criteria look satisfied when they
+   aren't really verifiable.
+
    Return:
    - the exact branch name you created
    - a one-paragraph summary of the change you made
@@ -211,6 +223,15 @@ const implemented = await agent(
 
 if (!implemented) {
   return { success: false, reason: 'implement phase failed to produce a change' }
+}
+
+if (implemented.blocked === true) {
+  return {
+    success: false,
+    blocked: true,
+    reason: implemented.blockedReason || 'implement phase reported the acceptance criteria are unsatisfiable in this environment, with no reason given',
+    branchName: typeof implemented.branchName === 'string' ? implemented.branchName.trim() : undefined,
+  }
 }
 
 // Everything downstream -- including a real "git push" -- trusts this string.
@@ -229,11 +250,11 @@ phase('Review')
 const lenses = [
   {
     key: 'correctness',
-    prompt: 'Review this diff for logic bugs and for behavior that does not match the acceptance criteria in the artifact.',
+    prompt: 'Review this diff for logic bugs and for behavior that does not match the acceptance criteria in the artifact. If a finding is that the acceptance criteria are fundamentally unsatisfiable in this environment -- not something the implementer coded wrong, but something no code change here can fix -- set blocked: true on that finding in addition to severity: blocking.',
   },
   {
     key: 'lifetime-threading',
-    prompt: 'Review this diff for pointer/reference lifetime issues and unsynchronized access to shared state. This server runs ~1000 concurrent playerbots and has a history of dangling-pointer and missing-lock bugs in exactly this kind of change.',
+    prompt: 'Review this diff for pointer/reference lifetime issues and unsynchronized access to shared state. This server runs ~1000 concurrent playerbots and has a history of dangling-pointer and missing-lock bugs in exactly this kind of change. If a finding is that the acceptance criteria are fundamentally unsatisfiable in this environment -- not something the implementer coded wrong, but something no code change here can fix -- set blocked: true on that finding in addition to severity: blocking.',
   },
 ]
 const reviews = await parallel(lenses.map((lens) => () =>
@@ -266,6 +287,17 @@ if (returnedReviews.length < lenses.length) {
 const allFindings = returnedReviews.flatMap((r) => r.findings || [])
 const blocking = allFindings.filter((f) => f.severity === 'blocking')
 const minor = allFindings.filter((f) => f.severity === 'minor')
+
+const blockingInfeasible = blocking.filter((f) => f.blocked === true)
+if (blockingInfeasible.length > 0) {
+  return {
+    success: false,
+    blocked: true,
+    reason: `review found the acceptance criteria unsatisfiable in this environment: ${blockingInfeasible.map((f) => f.summary).join('; ')}`,
+    branchName,
+  }
+}
+
 let contestedFindings = null
 if (blocking.length > 0) {
   const fixResult = await agent(

@@ -133,11 +133,15 @@ artifact before turning this loose on a real backlog — see
        not treat it as a per-artifact or systemic failure below.
    - **Per-artifact failure** — `success: false` with a reason that's about
      this issue's own implementation, review, or PR:
-     - Edit the artifact's frontmatter to `status: failed`.
-     - Append a `**Failure notes:** <reason>` line to the artifact body — use
-       the result's `reason` if present, otherwise record what was actually
-       returned or thrown so it's triage-able. Include the stale worktree and
-       branch location from step 9's lookup in that same line.
+     - If `blocked` is **not** `true`: edit the artifact's frontmatter to
+       `status: failed` and append a `**Failure notes:** <reason>` line —
+       use the result's `reason` if present, otherwise record what was
+       actually returned or thrown so it's triage-able. Include the stale
+       worktree and branch location from step 9's lookup in that same line.
+     - If `blocked` **is** `true`: edit the artifact's frontmatter to
+       `status: blocked` instead, and append a `**Blocked:** <reason>` line
+       using the result's `reason`. A blocked outcome is not a failure — do
+       not count it toward the circuit breaker in step 3.
    - **Systemic failure** — the invocation itself is broken, not this artifact:
      - Do **not** mark it `failed`. Set its frontmatter back to
        `status: pending` (reverse the step 6 edit; `git checkout -- <path>`
@@ -213,7 +217,11 @@ artifact before turning this loose on a real backlog — see
     "backlog: mark 003-bots-stuck-at-spirit-healer done"`. For a contested
     outcome, use `backlog: mark <artifact filename without .md> contested` —
     step 3's circuit breaker only matches subjects ending in `failed`, so this
-    form is already exempt without further changes there.
+    form is already exempt without further changes there. For a blocked
+    outcome, use `backlog: mark <artifact filename without .md> blocked` —
+    same reasoning: step 3's circuit breaker only matches subjects ending in
+    `failed`, so this form is automatically exempt too, with no change needed
+    to the grep itself.
 11. If the outcome you just recorded was `failed`, re-run step 3's check now
     (it now includes this tick's commit). If it trips, report as step 3
     describes and call `ScheduleWakeup({ stop: true })` instead of scheduling
