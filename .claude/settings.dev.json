@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "defaultMode": "default",
+    "allow": [
+      "Bash(git *)",
+      "Bash(gh *)",
+      "Bash(docker *)",
+      "Bash(cmake *)",
+      "Bash(make *)",
+      "Bash(ninja *)",
+      "Bash(python *)",
+      "Bash(python3 *)",
+      "Bash(pip *)",
+      "Bash(pip3 *)",
+      "Bash(./scripts/*)",
+      "Bash(bash scripts/*)"
+    ],
+    "deny": [
+      "Bash(git push --force*)",
+      "Bash(git reset --hard*)",
+      "Bash(rm -rf*)",
+      "Bash(docker compose down -v*)",
+      "Bash(docker compose down --volumes*)",
+      "Bash(docker volume rm*)",
+      "Bash(docker system prune*)",
+      "Bash(git push -f*)",
+      "Bash(git clean -fdx*)",
+      "Bash(git checkout -f*)",
+      "Bash(git restore --worktree*)",
+      "Bash(docker volume prune*)",
+      "Bash(docker image prune*)",
+      "Bash(docker rmi*)",
+      "Bash(docker image rm*)",
+      "Bash(rm -fr*)",
+      "Bash(rm -r -f*)",
+      "Bash(rm --recursive --force*)"
+    ]
+  }
+}
