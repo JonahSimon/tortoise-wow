@@ -69,6 +69,7 @@ artifact afterwards.
 | 5 | `005-implement-ontaxiflighteject` | low | 6 | 339,121 | 151 | 21m41s | PR #13, 2 files, +57/−4 |
 | 6 | `006-boat-walk-on-guard-and-stale-transport` | medium | 5 | 246,434 | 114 | 14m56s | PR #14, 2 files, +12/−6 |
 | 7 | `007-generate-and-ship-static-portal-links` | medium | 4 | 328,479 | 182 | 29m13s | **failed** — unsatisfiable ACs, no PR |
+| 8 | `008-dock-hops-carry-transport-entry` | medium | 6 | 496,141 | 217 | 42m08s | PR #15, 6 files, +255/−150 |
 
 Observations from the untuned run, all five ticks nominally `risk: low`:
 
