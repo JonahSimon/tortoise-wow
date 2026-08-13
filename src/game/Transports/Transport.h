@@ -101,6 +101,10 @@ class Transport : public GameObject
         void SendCreateUpdateToMap();
         void RemoveMapReference(Map* pMap) { m_maps.erase(pMap); }
 
+        //! Helper to know if a stop frame was reached, ie. the vessel is docked.
+        //! Public so callers can avoid stepping onto a vessel still under way.
+        bool IsMoving() const { return _isMoving; }
+
     private:
         void MoveToNextWaypoint();
         float CalculateSegmentPos(float perc);
@@ -108,8 +112,6 @@ class Transport : public GameObject
         void UpdatePassengerPositions(PassengerSet& passengers);
         void DoEventIfAny(KeyFrame const& node, bool departure);
 
-        //! Helpers to know if stop frame was reached
-        bool IsMoving() const { return _isMoving; }
         void SetMoving(bool val) { _isMoving = val; }
 
         TransportTemplate const* _transportInfo;
