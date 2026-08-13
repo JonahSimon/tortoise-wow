@@ -41,11 +41,33 @@ a scratch DB (row counts, no duplicate/self-referencing nodes) before
 committing them.
 
 **Accepted as out of scope** (2026-08-12): reviewed after the drain marked this
-`failed`, and the block is correct — this cannot be done from this repo. Not a
-retry candidate. If portal routing is wanted later, scope a new artifact that
-runs against a real scratch server with a world DB and a built core, and that
-does not forbid generating a node set for map 42. Original failure detail
-follows.
+`failed`, and the block is correct. Not a retry candidate.
+
+**Revised 2026-08-12, and the reason is stronger than the drain's.** The drain
+blamed the environment — no world DB, no built core, no mysql client. That
+objection has since lifted: the core now builds as a Docker image and the stack
+carries a MariaDB with the real world. It does not matter, because the real
+blocker is the data:
+
+**Map 42 is `Collin's Test`** — `sql/base/tw_world_map_template.sql:49` lists it
+as `(42,0,0,0,1,0,0,-1,0,0,'Collin\'s Test','')`: a leftover developer test map
+with a max of 1 player and no instance script. Both spawned teleporting
+spellcaster GOs (176296 "Portal to Stormwind", 176499 "Portal to Orgrimmar")
+sit there. The travel-node store has zero nodes on map 42 *correctly* — nothing
+goes there. Of the 13 `GAMEOBJECT_TYPE_SPELLCASTER` templates in
+`tw_world_gameobject_template.sql` (176296–176501 is the classic "Portal to X"
+set), this fork spawns only those two.
+
+So there is no reachable static portal for a bot to route through, and
+generating a node set for map 42 — now technically possible with a live server —
+would only let bots walk around a dev test map. Do not re-open this on the
+belief that a database was all that was missing.
+
+If bot portal travel is ever wanted, the prerequisite is **content**: spawn
+usable portals somewhere bots actually go. That is a design decision, not a
+bot-routing fix, and the routing work only becomes meaningful afterwards.
+
+Original failure detail follows.
 
 **Failure notes:** blocking findings not addressed — acceptance criteria 3 and
 4 (ship a SQL migration under `sql/database_updates/`, with validated row
