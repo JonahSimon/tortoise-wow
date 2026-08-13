@@ -98,11 +98,16 @@ Constraints inherited from
 
 ### Environment state found 2026-08-12
 
-- The wrapped invocation `wsl -d Ubuntu -- bash -lc '...'` was **canary-tested
-  and returns correct output** (file count 186 matched a native count), despite
-  the older plan's warning about mangled `$(...)`. Treat single-quoted commands
-  without substitutions as safe; re-canary before trusting anything with
-  `$(...)`.
+- **The wrapped invocation `wsl -d Ubuntu -- bash -lc '...'` is not safe.** An
+  earlier revision of this file claimed it was, on the strength of a canary that
+  matched a native file count (186). That canary contained no variables, which is
+  precisely why it passed. A later check using `$d` in a loop reported three
+  populated directories as `MISSING` — the older plan's warning is correct and
+  applies to plain `$var`, not only `$(...)`. Git Bash separately rewrites
+  absolute paths (`/mnt/c/...` → `C:/Program Files/Git/mnt/c/...`).
+  Use a **script file invoked from PowerShell** instead; see the expanded
+  constraint in `2026-08-11-docker-build-from-this-checkout.md`. That is the path
+  used for every stack operation in this plan.
 - **Docker is not exposed inside the Ubuntu distro** ("command 'docker' could
   not be found… activate WSL integration in Docker Desktop settings"). The
   Windows-side CLI works (`docker compose` v5.3.1).
