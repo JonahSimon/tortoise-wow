@@ -67,6 +67,20 @@ If bot portal travel is ever wanted, the prerequisite is **content**: spawn
 usable portals somewhere bots actually go. That is a design decision, not a
 bot-routing fix, and the routing work only becomes meaningful afterwards.
 
+**The code side is done and preserved.** Acceptance criteria 1 and 2 were
+actually implemented, on branch
+`origin/backlog/generate-and-ship-static-portal-links` (commits `76016c6` and
+`bb5aa26`): a `gen portal` command in `DebugAction.cpp` that adds nodes and
+links under the exclusive node-map lock (`m_nMapMtx`), flags the affected
+neighbourhood for walk-path regeneration, and rebuilds the reachability caches.
+That branch is kept on origin against the usual prune-by-default habit because
+it exists nowhere else — if content ever spawns a reachable portal, start there
+rather than from scratch. Only the data side is impossible.
+
+One further detail from that branch's own analysis: of the 13 spellcaster
+templates, **10 carry a `spell_target_position`**, so the shortage is purely one
+of *spawns*, not of usable portal templates.
+
 Original failure detail follows.
 
 **Failure notes:** blocking findings not addressed — acceptance criteria 3 and
