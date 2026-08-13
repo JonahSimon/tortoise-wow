@@ -65,6 +65,7 @@ artifact afterwards.
 | 1 | `001-map-gettransports-stub-returns-empty` | low | 6 | 252,903 | 133 | 16m16s | PR #9, 3 files, +35/−6 |
 | 2 | `002-taxi-cost-check-both-endpoints` | low | 6 | 224,143 | 95 | 10m41s | PR #10, 3 files, +34/−8 |
 | 3 | `003-honour-usetaxi-return-in-minimalmove` | low | 6 | 233,953 | 111 | 11m52s | PR #11, 2 files, +42/−2 |
+| 4 | `004-worldposition-gettransports-guid-bug` | low | 6 | 264,943 | 156 | 18m39s | PR #12, 4 files, +130/−18 |
 
 The comparison worth making is tokens-per-tick at equal outcome quality: did the
 tuned run still produce a PR that survives review without extra round trips?
