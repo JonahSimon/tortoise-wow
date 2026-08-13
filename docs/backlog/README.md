@@ -11,9 +11,10 @@ file each tick.
 
 ```markdown
 ---
-status: pending        # pending | in-progress | done | failed | out-of-scope
+status: pending        # pending | in-progress | implemented | done | contested | blocked | failed | out-of-scope
 risk: low               # low | medium | high — informational, not a gate
 area: playerbots/battlegrounds
+depends-on:              # optional: NNN-slug.md this must land after; omit if none
 ---
 
 # <Title>
@@ -59,6 +60,46 @@ tables — what breaks, under what load, traced to what.
   breaker — which is the intended way to accept a failure and let a future
   drain run continue past it. If the work should happen later under different
   conditions, scope that as a **new** artifact rather than reopening this one.
+- **implemented** — `backlog-issue` finished Implement and Review and the
+  change is committed to a local branch, but no build, in-stack validation,
+  or PR has happened yet. Artifacts wait here until `backlog-drain` has
+  accumulated enough of them (or run out of `pending` work) to run one batch
+  build instead of one per artifact — see
+  `docs/superpowers/plans/2026-08-13-backlog-drain-refinements.md` Tasks 7-9.
+  Carries a `**Base:**` line recording the branch it was cut from and, if
+  applicable, the dependency it's stacked on.
+- **contested** — a PR was opened, but a review finding and the implementer
+  disagreed and neither could be resolved autonomously. The PR body flags the
+  dispute under a "Contested" heading with the finding and the implementer's
+  rebuttal. Not the same as `done` — read the disputed finding before trusting
+  the diff. Does not count toward the two-consecutive-failure circuit breaker.
+- **blocked** — the Implement or Review phase determined the acceptance
+  criteria cannot be satisfied in this environment (missing data, missing
+  tooling, a decision only a human can make) — distinct from `failed` (a
+  fixable defect the implementer got wrong). Not retried automatically and,
+  like `out-of-scope`, does not count toward the circuit breaker. Triage:
+  either edit the artifact to remove the blocking constraint and reset to
+  `pending`, or reclassify to `out-of-scope` if it's permanently infeasible.
+
+## Dependencies
+
+Set `depends-on: <NNN>-<slug>.md` in an artifact's frontmatter when its fix
+can only be correctly implemented on top of another artifact's change — e.g.
+it edits a function the dependency adds, or its acceptance criteria assume
+the dependency's fix already landed. Leave the field blank for artifacts that
+don't depend on unmerged work — most artifacts have no dependency.
+
+`backlog-drain` skips a pending artifact whose `depends-on` target has not
+yet reached `status: done`, picking the next eligible pending artifact
+instead. Once eligible, `backlog-issue` cuts that artifact's branch from the
+dependency's branch (not from `cm-main`) whenever the dependency's PR is
+still unmerged, falling back to `cm-main` once it has merged. See
+"Branch strategy" in `docs/superpowers/specs/2026-08-11-backlog-workflow-design.md`
+for the rationale and the field-report evidence behind it.
+
+A chain (or cycle) of `depends-on` values that never resolves shows up as
+every remaining `pending` artifact being ineligible — `backlog-drain` reports
+that and stops rather than looping forever.
 
 ## Producing artifacts
 
