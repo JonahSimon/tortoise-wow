@@ -357,7 +357,7 @@ const prResult = await agent(
    3. Summary of the change made: ${implemented.summary}
    4. Acceptance criteria, quoted verbatim: "${implemented.acceptanceCriteria}"
    5. This verification note, verbatim: "${verifyNote || 'not available'}"
-   6. A line stating manual in-game testing is still required before merge${contestedSection}${minorSection}
+   6. A line stating manual in-game testing is still required before merge${minorSection}${contestedSection}
 
    Return the URL of the pull request you opened, and nothing else in that field.
    If you could not push or could not open the PR, say so in prUrl rather than
