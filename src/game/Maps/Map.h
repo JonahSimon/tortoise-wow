@@ -70,6 +70,7 @@ class BattleGround;
 class GridMap;
 class WeatherSystem;
 class Transport;
+class GenericTransport;
 
 namespace VMAP
 {
@@ -462,8 +463,7 @@ class Map : public GridRefManager<NGridType>
         // HasRealPlayers: cmangos checks if any non-bot players are on the map. Stub returns true.
         bool HasRealPlayers() const { return true; }
         // GetTransports: cmangos has Map::GetTransports returning a set/vector. Stub returns empty vector.
-        // Note: GenericTransport is a typedef in shim; forward-decl as struct avoids "class" keyword conflict.
-        std::vector<class Transport*> GetTransports() const { return {}; }
+        std::vector<Transport*> GetTransports() const { return {}; }
 
         // can't be nullptr for loaded map
         MapPersistentState* GetPersistentState() const { return m_persistentState; }
@@ -542,7 +542,7 @@ class Map : public GridRefManager<NGridType>
         Creature* GetCreature(ObjectGuid const& guid) { return GetObject<Creature>(guid); }
         Pet* GetPet(ObjectGuid const& guid) { return GetObject<Pet>(guid); }
         Creature* GetAnyTypeCreature(ObjectGuid guid);      // normal creature or pet
-        Transport* GetTransport(ObjectGuid guid);
+        GenericTransport* GetTransport(ObjectGuid guid);
         DynamicObject* GetDynamicObject(ObjectGuid guid) { return GetObject<DynamicObject>(guid); }
         Corpse* GetCorpse(ObjectGuid guid);                   // !!! find corpse can be not in world
         Unit* GetUnit(ObjectGuid guid);                       // only use if sure that need objects at current map, specially for player case
@@ -598,9 +598,9 @@ class Map : public GridRefManager<NGridType>
             return GetLosHitPosition(srcX, srcY, srcZ, destX, destY, destZ, modifyDist);
         }
         // Use navemesh to walk
-        bool GetWalkHitPosition(Transport* t, float srcX, float srcY, float srcZ, float& destX, float& destY, float& destZ, 
+        bool GetWalkHitPosition(GenericTransport* t, float srcX, float srcY, float srcZ, float& destX, float& destY, float& destZ, 
             uint32 moveAllowedFlags = 0xF /*NAV_GROUND | NAV_WATER | NAV_MAGMA | NAV_SLIME*/, float zSearchDist = 20.0f, bool locatedOnSteepSlope = true) const;
-        bool GetWalkRandomPosition(Transport* t, float &x, float &y, float &z, float maxRadius, bool allowStraightPath = false, uint32 moveAllowedFlags = 0xF) const;
+        bool GetWalkRandomPosition(GenericTransport* t, float &x, float &y, float &z, float maxRadius, bool allowStraightPath = false, uint32 moveAllowedFlags = 0xF) const;
         bool GetSwimRandomPosition(float& x, float& y, float& z, float radius, GridMapLiquidData& liquid_status, bool randomRange = true) const;
         VMAP::ModelInstance* FindCollisionModel(float x1, float y1, float z1, float x2, float y2, float z2);
 

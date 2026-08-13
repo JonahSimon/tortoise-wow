@@ -156,7 +156,7 @@ void WorldSession::HandleMoveWorldportAckOpcode()
     }
 
     GetPlayer()->SetMap(map);
-    if (Transport* t = GetPlayer()->GetTransport()) // Transport position may have changed while loading
+    if (GenericTransport* t = GetPlayer()->GetTransport()) // Transport position may have changed while loading
         t->UpdatePassengerPosition(GetPlayer());
     else
         GetPlayer()->Relocate(loc.x, loc.y, loc.z, loc.o);
@@ -1030,7 +1030,7 @@ void WorldSession::HandleMoveTimeSkippedOpcode(WorldPacket& recvData)
     if (_player->HasJustBoarded())
     {
         _player->SetJustBoarded(false);
-        if (Transport* pTransport = pMover->GetTransport())
+        if (GenericTransport* pTransport = pMover->GetTransport())
         {
             pTransport->SendOutOfRangeUpdateToPlayer(_player);
             pTransport->SendCreateUpdateToPlayer(_player);
@@ -1105,7 +1105,7 @@ void WorldSession::HandleMoverRelocation(Unit* pMover, MovementInfo& movementInf
             Unit* loadPetOnTransport = nullptr;
             if (!pPlayerMover->GetTransport())
             {
-                if (Transport* t = pPlayerMover->GetMap()->GetTransport(movementInfo.GetTransportGuid()))
+                if (GenericTransport* t = pPlayerMover->GetMap()->GetTransport(movementInfo.GetTransportGuid()))
                 {
                     t->AddPassenger(pPlayerMover);
                     pPlayerMover->UpdateSavedVelocityPositionToCurrentPos();

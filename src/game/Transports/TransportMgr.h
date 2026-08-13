@@ -20,6 +20,8 @@
 
 #include <G3D/Quat.h>
 #include "spline.h"
+#include <map>
+#include <unordered_map>
 #include <unordered_set>
 #include "DBCStores.h"
 
@@ -82,7 +84,35 @@ struct TransportTemplate
 };
 
 
-struct TransportAnimation;  // Defined in src/modules/PlayerBots/cmangos-compat-shim.h.
+// One sampled point of a GAMEOBJECT_TYPE_TRANSPORT (type 11) model animation: the offset from
+// the object's spawn pose, in the object's local frame, at TimeSeg ms into the loop.
+// Retail shipped this in TransportAnim.dbc, which does not exist in 1.12 client data; we keep
+// the same shape and load it from the `transport_animation` world table instead.
+struct TransportAnimationNode
+{
+    uint32 TimeIndex = 0;
+    uint32 TimeSeg = 0;
+    float X = 0, Y = 0, Z = 0;
+};
+
+typedef std::map<uint32, TransportAnimationNode*> TransportPathContainer;
+
+struct TransportAnimation
+{
+    TransportAnimation() = default;
+    // Path owns its nodes, so copying would double-free them.
+    TransportAnimation(TransportAnimation const&) = delete;
+    TransportAnimation& operator=(TransportAnimation const&) = delete;
+    ~TransportAnimation();
+
+    // cmangos uses a time-keyed map of pointers (so iterators yield (uint32, TransportAnimationNode*) pairs).
+    TransportPathContainer Path;
+    uint32 TotalTime = 0;
+    // Where in the loop the *client* thinks the model is at server time 0. Measured in-game per
+    // entry (see docs/playerbots/BOT-TRANSPORT-INVESTIGATION.md, D3 calibration) and stored in
+    // `transport_animation_phase`; 0 until an entry has been calibrated.
+    uint32 EpochOffset = 0;
+};
 
 class TransportMgr
 {
@@ -90,13 +120,20 @@ class TransportMgr
 
     public:
 
-        // bot calls GetTransportAnimInfo for elevator pathing.
-        // Penqle has no TransportAnim.dbc; stub returns nullptr.
-        TransportAnimation const* GetTransportAnimInfo(uint32 /*entry*/) const { return nullptr; }
+        // Animation data for a GO type 11 (elevator / lift / tram car). Drives LocalTransport's
+        // server-side mirror of the client animation, and the bot module's elevator pathing.
+        TransportAnimation const* GetTransportAnimInfo(uint32 entry) const
+        {
+            auto itr = _transportAnimations.find(entry);
+            return itr != _transportAnimations.end() ? &itr->second : nullptr;
+        }
 
         void Unload();
 
         void LoadTransportTemplates();
+
+        // Loads `transport_animation` / `transport_animation_phase` into _transportAnimations.
+        void LoadTransportAnimations();
 
         // Creates a transport using given GameObject template entry
         Transport* CreateTransport(uint32 entry, uint32 guid = 0);
@@ -122,6 +159,9 @@ class TransportMgr
         TransportMgr(TransportMgr const&);
         TransportMgr& operator=(TransportMgr const&);
 
+        // Applies the in-game-measured phase offsets on top of the freshly loaded animations.
+        void LoadTransportAnimationPhases();
+
         // Generates and precaches a path for transport to avoid generation each time transport instance is created
         void GeneratePath(GameObjectInfo const* goInfo, TransportTemplate* transport);
 
@@ -130,6 +170,9 @@ class TransportMgr
 
         // Container storing transport entries to create for instanced maps
         TransportInstanceMap _instanceTransports;
+
+        // Container storing type-11 model animations, keyed by gameobject_template.entry
+        std::unordered_map<uint32, TransportAnimation> _transportAnimations;
 
         // Container for all ship transports
         std::unordered_set<Transport*> m_shipTransports;

@@ -1611,7 +1611,7 @@ void Map::SendInitSelf(Player * player)
     bool hasTransport = false;
 
     // attach to player data current transport data
-    if (Transport* transport = player->GetTransport())
+    if (GenericTransport* transport = player->GetTransport())
     {
         hasTransport = true;
         transport->BuildCreateUpdateBlockForPlayer(&data, player);
@@ -1621,7 +1621,7 @@ void Map::SendInitSelf(Player * player)
     player->BuildCreateUpdateBlockForPlayer(&data, player);
 
     // build other passengers at transport also (they always visible and marked as visible and will not send at visibility update at add to map
-    if (Transport* transport = player->GetTransport())
+    if (GenericTransport* transport = player->GetTransport())
         for (const auto itr : transport->GetPassengers())
             if (player != itr && player->IsInVisibleList(itr))
             {
@@ -2623,7 +2623,7 @@ Creature* Map::GetAnyTypeCreature(ObjectGuid guid)
     return nullptr;
 }
 
-Transport* Map::GetTransport(ObjectGuid guid)
+GenericTransport* Map::GetTransport(ObjectGuid guid)
 {
     if (guid.IsMOTransport())
     {
@@ -2632,8 +2632,9 @@ Transport* Map::GetTransport(ObjectGuid guid)
                 return pTransport;
     }
 
+    // Not an MO transport guid, so it is a type-11 gameobject: an elevator, a lift or a tram car.
     GameObject* go = GetGameObject(guid);
-    return go ? go->ToTransport() : nullptr;
+    return go ? go->ToGenericTransport() : nullptr;
 }
 
 /**
@@ -3073,7 +3074,7 @@ bool Map::GetLosHitPosition(float srcX, float srcY, float srcZ, float& destX, fl
     return result0;
 }
 
-bool Map::GetWalkHitPosition(Transport* transport, float srcX, float srcY, float srcZ, float& destX, float& destY, float& destZ, uint32 moveAllowedFlags, float zSearchDist, bool locatedOnSteepSlope) const
+bool Map::GetWalkHitPosition(GenericTransport* transport, float srcX, float srcY, float srcZ, float& destX, float& destY, float& destZ, uint32 moveAllowedFlags, float zSearchDist, bool locatedOnSteepSlope) const
 {
     if (!MaNGOS::IsValidMapCoord(srcX, srcY, srcZ))
     {
@@ -3218,7 +3219,7 @@ bool Map::GetSwimRandomPosition(float& x, float& y, float& z, float radius, Grid
     return false;
 }
 
-bool Map::GetWalkRandomPosition(Transport* transport, float& x, float& y, float& z, float maxRadius, bool allowStraightPath, uint32 moveAllowedFlags) const
+bool Map::GetWalkRandomPosition(GenericTransport* transport, float& x, float& y, float& z, float maxRadius, bool allowStraightPath, uint32 moveAllowedFlags) const
 {
     ASSERT(MaNGOS::IsValidMapCoord(x, y, z));
 

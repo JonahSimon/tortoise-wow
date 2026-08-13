@@ -134,6 +134,20 @@ bool IsEnabledOnMap<Creature>(Map* map, uint32 guid)
     return data->instanciatedContinentInstanceId == map->GetInstanceId();
 }
 
+// Most grid object types have exactly one class; a gameobject spawn picks its class from the
+// template type (GAMEOBJECT_TYPE_TRANSPORT becomes a LocalTransport).
+template <typename T>
+T* NewGridObject(uint32 /*guid*/)
+{
+    return new T;
+}
+
+template <>
+GameObject* NewGridObject<GameObject>(uint32 guid)
+{
+    return GameObject::CreateGameObjectForSpawn(guid);
+}
+
 template <class T>
 void LoadHelper(CellGuidSet const& guid_set, CellPair &cell, GridRefManager<T> &m, uint32 &count, Map* map, GridType& grid)
 {
@@ -144,7 +158,7 @@ void LoadHelper(CellGuidSet const& guid_set, CellPair &cell, GridRefManager<T> &
         if (!IsEnabledOnMap<T>(map, guid))
             continue;
 
-        T* obj = new T;
+        T* obj = NewGridObject<T>(guid);
         //sLog.outString("DEBUG: LoadHelper from table: %s for (guid: %u) Loading",table,guid);
         if (!obj->LoadFromDB(guid, map))
         {

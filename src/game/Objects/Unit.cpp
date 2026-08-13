@@ -3287,7 +3287,7 @@ void Unit::SetFacingTo(float ori)
     m_movementInfo.ChangeOrientation(ori);
 
     Movement::MoveSplineInit init(*this, "SetFacingTo");
-    if (Transport* t = GetTransport())
+    if (GenericTransport* t = GetTransport())
         init.SetTransport(t->GetGUIDLow());
     init.SetFacing(ori);
     init.Launch();
@@ -9777,7 +9777,7 @@ void Unit::StopMoving(bool force)
     if (!movespline->Finalized() || force)
     {
         Movement::MoveSplineInit init(*this, "StopMoving");
-        if (Transport* t = GetTransport())
+        if (GenericTransport* t = GetTransport())
             init.SetTransport(t->GetGUIDLow());
         init.SetStop(); // Will trigger CMSG_MOVE_SPLINE_DONE from client.
         init.Launch();
@@ -11442,7 +11442,7 @@ void Unit::UpdateSplineMovement(uint32 t_diff)
     }
 
     Movement::Location loc = movespline->ComputePosition();
-    if (Transport* t = GetTransport())
+    if (GenericTransport* t = GetTransport())
     {
         m_movementInfo.GetTransportPos().x = loc.x;
         m_movementInfo.GetTransportPos().y = loc.y;

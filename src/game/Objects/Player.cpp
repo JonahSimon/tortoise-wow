@@ -2015,7 +2015,7 @@ void Player::RelocateToLastClientPosition()
     }
 }
 
-void Player::GetSafePosition(float &x, float &y, float &z, Transport* onTransport) const
+void Player::GetSafePosition(float &x, float &y, float &z, GenericTransport* onTransport) const
 {
     if (!onTransport && m_movementInfo.ctime >  0)
     {
@@ -8121,7 +8121,7 @@ void Player::DismountCheck()
     }
 }
 
-void Player::SetTransport(Transport* t)
+void Player::SetTransport(GenericTransport* t)
 {
     WorldObject::SetTransport(t);
 
