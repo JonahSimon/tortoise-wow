@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 risk: low
 area: playerbots/transport
 ---
@@ -33,3 +33,5 @@ caller is `src/modules/PlayerBots/playerbot/WorldPosition.cpp:564`
 **Notes:** One-line fix per `docs/playerbots/BOT-TRANSPORT-INVESTIGATION.md`
 ("D1"). `_transports` is `private:` and `GetTransports()` is declared
 `public:` in the same class, so no access-level change is needed.
+
+**Result:** PR opened at https://github.com/ChrisMiho/tortoise-wow/pull/9

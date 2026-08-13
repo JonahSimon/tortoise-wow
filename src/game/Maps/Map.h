@@ -70,6 +70,8 @@ class BattleGround;
 class GridMap;
 class WeatherSystem;
 class Transport;
+class GenericTransport;
+class LocalTransport;
 
 namespace VMAP
 {
@@ -367,6 +369,7 @@ class Map : public GridRefManager<NGridType>
         inline void UpdateActiveCellsAsynch(uint32 now, uint32 diff);
         inline void UpdateActiveCellsCallback(uint32 diff, uint32 now, uint32 threadId, uint32 totalThreads, uint32 step);
         inline void UpdateCells(uint32 diff);
+        void UpdateCarryingTransports();
         void UpdateSync(const uint32);
         void UpdatePlayers();
         void DoUpdate(uint32 maxDiff);
@@ -461,9 +464,17 @@ class Map : public GridRefManager<NGridType>
         bool HasActiveZones() const { return true; }
         // HasRealPlayers: cmangos checks if any non-bot players are on the map. Stub returns true.
         bool HasRealPlayers() const { return true; }
-        // GetTransports: cmangos has Map::GetTransports returning a set/vector. Stub returns empty vector.
+        // GetTransports: cmangos has Map::GetTransports returning a set/vector. Here it copies the
+        // live _transports set (MO-transports: boats/zeppelins) into a vector for the bot lookup.
         // Note: GenericTransport is a typedef in shim; forward-decl as struct avoids "class" keyword conflict.
-        std::vector<class Transport*> GetTransports() const { return {}; }
+        // Bots query a *different* map's transports than the one they are updating on (the cross-map
+        // dock case), and continent maps update on parallel threads while Transport::TeleportTransport
+        // erases/reinserts entries mid-update, so the copy is taken under _transports_lock.
+        std::vector<class Transport*> GetTransports() const
+        {
+            std::shared_lock<std::shared_mutex> lock(_transports_lock);
+            return std::vector<Transport*>(_transports.begin(), _transports.end());
+        }
 
         // can't be nullptr for loaded map
         MapPersistentState* GetPersistentState() const { return m_persistentState; }
@@ -527,6 +538,23 @@ class Map : public GridRefManager<NGridType>
         // must called with RemoveFromWorld
         void RemoveFromActive(WorldObject* obj);
 
+        // Local transports (elevators, lifts, tram cars) that currently carry a passenger. They
+        // stay linked in the cell they were spawned in but have to drag their passengers wherever
+        // those have got to, so they are driven from Map::Update instead of from cell visits, which
+        // only happen while a player is near that one cell. Registered by LocalTransport itself
+        // while it has passengers - which can happen from a worker thread during the multithreaded
+        // cell update, hence the lock.
+        void AddCarryingTransport(LocalTransport* transport)
+        {
+            std::unique_lock<std::mutex> lock(_carryingTransports_lock);
+            _carryingTransports.insert(transport);
+        }
+        void RemoveCarryingTransport(LocalTransport* transport)
+        {
+            std::unique_lock<std::mutex> lock(_carryingTransports_lock);
+            _carryingTransports.erase(transport);
+        }
+
         void SetSummonLimitForObject(uint64 guid, uint32 limit);
         uint32 GetSummonLimitForObject(uint64 guid) const;
         uint32 GetSummonCountForObject(uint64 guid) const;
@@ -542,7 +570,7 @@ class Map : public GridRefManager<NGridType>
         Creature* GetCreature(ObjectGuid const& guid) { return GetObject<Creature>(guid); }
         Pet* GetPet(ObjectGuid const& guid) { return GetObject<Pet>(guid); }
         Creature* GetAnyTypeCreature(ObjectGuid guid);      // normal creature or pet
-        Transport* GetTransport(ObjectGuid guid);
+        GenericTransport* GetTransport(ObjectGuid guid);
         DynamicObject* GetDynamicObject(ObjectGuid guid) { return GetObject<DynamicObject>(guid); }
         Corpse* GetCorpse(ObjectGuid guid);                   // !!! find corpse can be not in world
         Unit* GetUnit(ObjectGuid guid);                       // only use if sure that need objects at current map, specially for player case
@@ -598,9 +626,9 @@ class Map : public GridRefManager<NGridType>
             return GetLosHitPosition(srcX, srcY, srcZ, destX, destY, destZ, modifyDist);
         }
         // Use navemesh to walk
-        bool GetWalkHitPosition(Transport* t, float srcX, float srcY, float srcZ, float& destX, float& destY, float& destZ, 
+        bool GetWalkHitPosition(GenericTransport* t, float srcX, float srcY, float srcZ, float& destX, float& destY, float& destZ, 
             uint32 moveAllowedFlags = 0xF /*NAV_GROUND | NAV_WATER | NAV_MAGMA | NAV_SLIME*/, float zSearchDist = 20.0f, bool locatedOnSteepSlope = true) const;
-        bool GetWalkRandomPosition(Transport* t, float &x, float &y, float &z, float maxRadius, bool allowStraightPath = false, uint32 moveAllowedFlags = 0xF) const;
+        bool GetWalkRandomPosition(GenericTransport* t, float &x, float &y, float &z, float maxRadius, bool allowStraightPath = false, uint32 moveAllowedFlags = 0xF) const;
         bool GetSwimRandomPosition(float& x, float& y, float& z, float radius, GridMapLiquidData& liquid_status, bool randomRange = true) const;
         VMAP::ModelInstance* FindCollisionModel(float x1, float y1, float z1, float x2, float y2, float z2);
 
@@ -742,7 +770,15 @@ class Map : public GridRefManager<NGridType>
 
         // Objects that must update even in inactive grids without activating them
         typedef std::set<Transport*> TransportsContainer;
+        // Guards the structure of _transports only. Readers on other maps' threads (GetTransports)
+        // take it shared; Map::Add/Remove<Transport> take it exclusively around the insert/erase.
+        // Held for the insert/erase alone, never across a Remove call, so the UnloadAll and update
+        // walks that call Remove while iterating cannot self-deadlock on this non-recursive mutex.
+        mutable std::shared_mutex _transports_lock;
         TransportsContainer _transports;
+        // Occupied local transports; see AddCarryingTransport.
+        mutable std::mutex _carryingTransports_lock;
+        std::set<LocalTransport*> _carryingTransports;
         bool m_unloading = false;
         bool m_crashed = false;
         bool m_updateFinished = false;

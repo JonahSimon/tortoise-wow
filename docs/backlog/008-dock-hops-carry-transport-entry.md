@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 risk: medium
 area: playerbots/transport
 ---
@@ -40,3 +40,5 @@ its four call sites (`:2454`, `:2506`, `:2556`); seeded rows in
 This alone does not make the tram move — that needs the `LocalTransport`
 backlog item — but it is a prerequisite: without it, `UseTransport` can never
 look up the right car even once it's capable of moving.
+
+**Result:** PR opened at https://github.com/ChrisMiho/tortoise-wow/pull/15

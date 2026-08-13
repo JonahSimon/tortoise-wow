@@ -1,0 +1,58 @@
+---
+status: pending
+risk: medium
+area: playerbots/transport
+---
+
+# getGameObjectsNear walks every GO spawn in the world on every call
+
+**Problem:** `WorldPosition::getGameObjectsNear` (and its creature twin) runs
+`sObjectMgr.DoGOData(worker)`, which iterates the entire `m_GameObjectDataMap`
+— every gameobject spawn in the world, not just the current map — and the
+`FindPointGameObjectData` predicate always returns `false`, so the loop never
+breaks early (`src/game/ObjectMgr.h:1234`).
+
+The map, entry and radius arguments are all applied *inside* the predicate.
+They decide which spawns land in the result vector; none of them shortens the
+walk. So the cost is the same whether the caller asks for one entry within
+200y or for everything on the map.
+
+That walk sits under the elevator/tram fallback in
+`WorldPosition::getTransports`, which `MovementAction::UseTransport` calls for
+every bot waiting at a transport, every tick. With ~1000 bots this is a
+meaningful CPU sink. Other hot callers exist:
+`TravelNode.cpp:2417` (`getGameObjectsNear(0, entry)`) and
+`RandomPlayerbotMgr.cpp:3017`.
+
+This was originally filed as part of artifact 004 with the proposed fix "pass a
+bounded radius instead of `0.0f`". That was withdrawn: a radius cannot fix
+this (see above), and bounding the tram lookup actively broke it — callers pass
+a *dock* position and select the nearest match themselves, and the six Deeprun
+Tram cars sit in two clusters ~2460y apart on map 369, so a 200y filter hid
+three of them from either platform.
+
+**Suspected cause / area:**
+`src/modules/PlayerBots/playerbot/WorldPosition.cpp:1298-1310`
+(`getCreaturesNear` / `getGameObjectsNear`), `:1287`
+(`FindPointGameObjectData::operator()`), `src/game/ObjectMgr.h:1234`
+(`DoGOData`).
+
+**Acceptance criteria:**
+- Looking up GO spawns by entry no longer walks the whole spawn map. Build an
+  index (e.g. entry → spawn ids, or map+entry → spawn ids) once and query it,
+  so an entry-filtered lookup is proportional to the number of matches.
+- Results are unchanged for every existing caller: same spawns, no distance
+  filtering introduced where callers relied on its absence. In particular
+  `getTransports(entry)` from a dock position must still find a tram car
+  ~2500y away on the same map.
+- The index is populated from the same data `DoGOData` reads, and stays correct
+  across the GM `.gobject add` / `.gobject delete` paths that mutate
+  `m_GameObjectDataMap` (`NewGOData` / `DeleteGOData`) — either by updating the
+  index there or by documenting and accepting the staleness explicitly.
+- Thread safety is considered: map updates can run on multiple threads, so a
+  lazily-built shared index needs to be either built once during load or
+  guarded.
+
+**Notes:** Per `docs/playerbots/BOT-TRANSPORT-INVESTIGATION.md` ("D2", the
+paragraph on why a radius bound is the wrong fix). Split out of artifact 004,
+which now fixes only the guid bug and the missing null check.

@@ -2195,7 +2195,7 @@ class Player final: public Unit
             m_summon_z = z;
         }
         void SummonIfPossible(bool agree);
-        void SetTransport(Transport* t) override;
+        void SetTransport(GenericTransport* t) override;
         void DismountCheck();
 
         // knockback/jumping states
@@ -2486,7 +2486,52 @@ class Player final: public Unit
         // TakeQuestSourceItem: cmangos quest helper. Stub no-op.
         void TakeQuestSourceItem(uint32 /*quest_id*/, bool /*sendUpdate*/ = true) {}
         // OnTaxiFlightEject: cmangos handler called when bot is forced off taxi.
-        void OnTaxiFlightEject(bool /*force*/ = false) {}
+        // Bots call this before boarding a new flight, so it has to actually end the
+        // one in progress -- while it was a no-op every hop after the first failed.
+        // Mirrors the forced-taxi-teardown already used for battleground invites in
+        // WorldSession::HandleBattlefieldPortOpcode.
+        void OnTaxiFlightEject(bool force = false)
+        {
+            if (!IsTaxiFlying())
+                return;
+
+            // Drop the remaining hops first so FlightPathMovementGenerator::Finalize()
+            // -- run synchronously from MovementExpired() below -- sees an empty taxi
+            // and stops the spline instead of continuing to the next node.
+            m_taxi.ClearTaxiDestinations();
+            GetMotionMaster()->MovementExpired();
+
+            // force means "the flight is over no matter what the movement stack says",
+            // which is what every bot call site wants.
+            if (force)
+            {
+                // MovementExpired() only pops the top generator, so anything pushed on
+                // top of the flight is still flying the bot around. Reset the stack.
+                if (GetMotionMaster()->GetCurrentMovementGeneratorType() != IDLE_MOTION_TYPE)
+                    GetMotionMaster()->Initialize();
+
+                // Finalize() normally runs CleanupFlagsOnTaxiPathFinished() for us; only
+                // repeat the flag teardown when something was left behind.
+                if (HasUnitState(UNIT_STAT_TAXI_FLIGHT) ||
+                    HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_TAXI_FLIGHT | UNIT_FLAG_DISABLE_MOVE) ||
+                    HasMovementFlag(MOVEFLAG_FLYING) ||
+                    GetMountID())
+                {
+                    CleanupFlagsOnTaxiPathFinished();
+                    SendHeartBeat();
+                }
+            }
+
+            // Never leave fall information armed. IsFalling() here is purely
+            // "m_fallStartZ != 0", and PlayerbotAI::CanMove() refuses to move a bot
+            // that is falling; a bot has no client to send the MSG_MOVE_FALL_LAND that
+            // UpdateFallInformationIfNeed() would clear it on, so a non-zero start Z
+            // strands the bot at flight altitude forever (see the same hazard handled
+            // for jump landings in PlayerbotAI::UpdateAI) and arms full-altitude
+            // fall damage in HandleFall(). Zero it last, after the generator teardown
+            // above has had its own say.
+            SetFallInformation(0, 0.0f);
+        }
         // GetMountInfo: cmangos returns the bot's saved mount data with Name field. Stub returns nullptr.
         struct MountInfoStub { std::string Name; };
         MountInfoStub const* GetMountInfo() const { return nullptr; }
@@ -3164,7 +3209,7 @@ public:
         bool FallGround(uint8 fallMode);
         void OnDisconnected();
         void RelocateToLastClientPosition();
-        void GetSafePosition(float &x, float &y, float &z, Transport* onTransport = nullptr) const override;
+        void GetSafePosition(float &x, float &y, float &z, GenericTransport* onTransport = nullptr) const override;
 
 // Packet broadcaster:
 

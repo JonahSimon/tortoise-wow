@@ -206,6 +206,8 @@ set (game_SRCS
     Spells/SpellModMgr.cpp
     Threat/HostileRefManager.cpp
     Threat/ThreatManager.cpp
+    Transports/GenericTransport.cpp
+    Transports/LocalTransport.cpp
     Transports/Transport.cpp
     Transports/TransportMgr.cpp
     TWDebuff/TWDebuff.cpp
@@ -401,6 +403,8 @@ set (game_SRCS
     Spells/SpellModMgr.h
     Threat/HostileRefManager.h
     Threat/ThreatManager.h
+    Transports/GenericTransport.h
+    Transports/LocalTransport.h
     Transports/Transport.h
     Transports/TransportMgr.h
     vmap/BIH.h

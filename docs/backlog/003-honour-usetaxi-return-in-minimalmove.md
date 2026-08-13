@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 risk: low
 area: playerbots/transport
 ---
@@ -32,3 +32,5 @@ Combined with `T1` (checking both taxi endpoints), this removes the main
 source of invisible flight-path failures for unobserved bots — the failure
 was masked precisely because unobserved bots teleport onward and paper over
 the skipped leg.
+
+**Result:** PR opened at https://github.com/ChrisMiho/tortoise-wow/pull/11

@@ -36,6 +36,12 @@ TransportTemplate::~TransportTemplate()
         delete spline;
 }
 
+TransportAnimation::~TransportAnimation()
+{
+    for (auto const& node : Path)
+        delete node.second;
+}
+
 TransportMgr::TransportMgr() { }
 
 TransportMgr::~TransportMgr() { }
@@ -48,6 +54,108 @@ void TransportMgr::Unload()
     m_shipTransports.clear();
 
     _transportTemplates.clear();
+    _transportAnimations.clear();
+}
+
+void TransportMgr::LoadTransportAnimations()
+{
+    uint32 oldMSTime = WorldTimer::getMSTime();
+
+    _transportAnimations.clear();
+
+    //                                                     0        1           2    3    4
+    QueryResult* result = WorldDatabase.Query("SELECT `entry`, `time_seg`, `x`, `y`, `z` FROM `transport_animation` ORDER BY `entry`, `time_seg`");
+
+    if (!result)
+    {
+        sLog.outString(">> Loaded 0 transport animation nodes. Elevators and the Deeprun Tram will not move server-side.");
+        return;
+    }
+
+    uint32 count = 0;
+    do
+    {
+        Field* fields = result->Fetch();
+        uint32 entry = fields[0].GetUInt32();
+
+        GameObjectInfo const* goInfo = sObjectMgr.GetGameObjectInfo(entry);
+        if (!goInfo)
+        {
+            sLog.outErrorDb("Table `transport_animation` has entry %u that does not exist in `gameobject_template`, skipped.", entry);
+            continue;
+        }
+
+        if (goInfo->type != GAMEOBJECT_TYPE_TRANSPORT)
+        {
+            sLog.outErrorDb("Table `transport_animation` has entry %u of type %u; only type %u (GAMEOBJECT_TYPE_TRANSPORT) is animated, skipped.", entry, goInfo->type, uint32(GAMEOBJECT_TYPE_TRANSPORT));
+            continue;
+        }
+
+        TransportAnimation& animation = _transportAnimations[entry];
+
+        TransportAnimationNode* node = new TransportAnimationNode();
+        node->TimeIndex = uint32(animation.Path.size());
+        node->TimeSeg = fields[1].GetUInt32();
+        node->X = fields[2].GetFloat();
+        node->Y = fields[3].GetFloat();
+        node->Z = fields[4].GetFloat();
+
+        // Duplicate (entry, time_seg) is impossible - it is the primary key - so the insert
+        // always takes and the node is always owned by the animation.
+        animation.Path[node->TimeSeg] = node;
+
+        if (node->TimeSeg > animation.TotalTime)
+            animation.TotalTime = node->TimeSeg;
+
+        ++count;
+    }
+    while (result->NextRow());
+
+    delete result;
+
+    // The highest time_seg closes the loop (it repeats the offset of time_seg 0), so it doubles
+    // as the loop length. With a single keyframe there is nothing to interpolate towards and no
+    // period at all, so the entry is unusable.
+    for (auto itr = _transportAnimations.begin(); itr != _transportAnimations.end();)
+    {
+        if (itr->second.Path.size() < 2)
+        {
+            sLog.outErrorDb("Table `transport_animation` has only one node for entry %u; at least two are needed to interpolate. Entry dropped.", itr->first);
+            itr = _transportAnimations.erase(itr);
+            continue;
+        }
+        ++itr;
+    }
+
+    LoadTransportAnimationPhases();
+
+    sLog.outString(">> Loaded %u transport animation nodes for %u gameobjects in %u ms", count, uint32(_transportAnimations.size()), WorldTimer::getMSTimeDiffToNow(oldMSTime));
+}
+
+void TransportMgr::LoadTransportAnimationPhases()
+{
+    QueryResult* result = WorldDatabase.Query("SELECT `entry`, `epoch_offset` FROM `transport_animation_phase`");
+
+    if (!result)
+        return;
+
+    do
+    {
+        Field* fields = result->Fetch();
+        uint32 entry = fields[0].GetUInt32();
+
+        auto itr = _transportAnimations.find(entry);
+        if (itr == _transportAnimations.end())
+        {
+            sLog.outErrorDb("Table `transport_animation_phase` has entry %u with no rows in `transport_animation`, skipped.", entry);
+            continue;
+        }
+
+        itr->second.EpochOffset = fields[1].GetUInt32() % itr->second.TotalTime;
+    }
+    while (result->NextRow());
+
+    delete result;
 }
 
 void TransportMgr::LoadTransportTemplates()
