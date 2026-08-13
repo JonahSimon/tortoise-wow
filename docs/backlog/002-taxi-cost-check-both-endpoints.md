@@ -16,16 +16,31 @@ to be known, and rejects the flight while logging a `PassiveAnticheat`
 "Attempt to use unknown node" entry when the source node isn't. The router
 can therefore select flights the core will always refuse.
 
-**Suspected cause / area:** `src/modules/PlayerBots/playerbot/TravelNode.cpp:168`
-(`getCost`, `flightPath` branch).
+**Correction found while implementing:** an unlearned *source* node is not
+actually fatal to the bot. `MovementAction::UseTaxi` learns it right before
+calling `ActivateTaxiPathTo` whenever a flight master is in range
+(`SendLearnNewTaxiNode`, `MovementActions.cpp:286-292`), which covers the
+`needNpc = true` callers (`MovementActions.cpp:825`, `:1833`). Because
+`PlayerbotFactory::InitTaxiNodes` grants each bot only a random, level-gated
+subset of nodes, unlearned source nodes are the common case, so rejecting
+those legs in `getCost` would have stripped a large share of *working* flight
+travel from the router. The only caller that really trips the anticheat is the
+passive-teleport path `UseTaxi(ai, nextStep->entry, false)`
+(`MovementActions.cpp:546`): it passes `needNpc = false`, has no flight master
+to talk to, and therefore never learns the node it was teleported onto.
+
+**Suspected cause / area:**
+`src/modules/PlayerBots/playerbot/strategy/actions/MovementActions.cpp:254`
+(`UseTaxi`, `needNpc = false` branch).
 
 **Acceptance criteria:**
-- `getCost` returns -1 (unusable) for a flight-path link unless both
-  `taxiPath->from` and `taxiPath->to` are known via `IsTaximaskNodeKnown`, for
-  non-taxi-cheater bots.
-- A bot whose route would previously have picked a flight leg with an
-  unlearned source node no longer selects that leg, and no longer generates
-  a `PassiveAnticheat` "Attempt to use unknown node" log entry for it.
+- `getCost` still only requires `taxiPath->to` to be known, so legs whose
+  source node `UseTaxi` can learn stay available to the router.
+- `UseTaxi` guarantees the source node is known before calling
+  `ActivateTaxiPathTo` on both paths: via `SendLearnNewTaxiNode` when a flight
+  master is in range, and directly for the no-NPC teleport path.
+- Bots no longer generate `PassiveAnticheat` "Attempt to use unknown node"
+  entries for flights whose source node they had not learned.
 
 **Notes:** Per `docs/playerbots/BOT-TRANSPORT-INVESTIGATION.md` ("T1").
 Independently shippable, but pairs naturally with the `T3` fix (honour

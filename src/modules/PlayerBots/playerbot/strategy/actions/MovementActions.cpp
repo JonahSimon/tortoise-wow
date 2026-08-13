@@ -298,6 +298,14 @@ bool MovementAction::UseTaxi(PlayerbotAI* ai, uint32 entry, bool needNpc)
             unit->SetFacingTo(unit->GetAngle(bot));
         }
     }
+    else if (!bot->IsTaxiCheater() && !bot->m_taxi.IsTaximaskNodeKnown(tEntry->from))
+    {
+        // No flight master to talk to (the bot was teleported onto the node by the passive
+        // movement path), so nothing sends SendLearnNewTaxiNode for us. Learn the source node
+        // the bot is standing on directly, otherwise ActivateTaxiPathTo refuses the flight and
+        // logs a PassiveAnticheat "Attempt to use unknown node" for every attempt.
+        bot->m_taxi.SetTaximaskNode(tEntry->from);
+    }
 
     uint32 botMoney = bot->GetMoney();
     if (ai->HasCheat(BotCheatMask::gold) || ai->HasCheat(BotCheatMask::taxi))
