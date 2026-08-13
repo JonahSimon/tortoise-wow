@@ -68,6 +68,7 @@ artifact afterwards.
 | 4 | `004-worldposition-gettransports-guid-bug` | low | 6 | 264,943 | 156 | 18m39s | PR #12, 4 files, +130/−18 |
 | 5 | `005-implement-ontaxiflighteject` | low | 6 | 339,121 | 151 | 21m41s | PR #13, 2 files, +57/−4 |
 | 6 | `006-boat-walk-on-guard-and-stale-transport` | medium | 5 | 246,434 | 114 | 14m56s | PR #14, 2 files, +12/−6 |
+| 7 | `007-generate-and-ship-static-portal-links` | medium | 4 | 328,479 | 182 | 29m13s | **failed** — unsatisfiable ACs, no PR |
 
 Observations from the untuned run, all five ticks nominally `risk: low`:
 
@@ -91,6 +92,24 @@ If per-artifact escalation is implemented, core proximity looks like the better
 signal to escalate on than either the risk label or expected diff size. That may
 warrant a `touches-core:` field in the artifact format rather than overloading
 `risk:`.
+
+### Tick 7 is evidence against downgrading the review lenses
+
+The one failure in this run is the strongest argument in the file *against* part
+of its own proposal. Tick 7 failed because a review lens refused to accept
+acceptance criteria it judged unsatisfiable: shipping a validated SQL migration
+with no world DB, no built core, and no mysql client in the tree, for a portal on
+a map with zero travel nodes. The cheap wrong answer was available and plausible
+— hand-write the INSERTs, claim the criteria met, open the PR. That would have
+produced unvalidated data-migration SQL against a live world DB, and it would
+have looked like a success in every field this loop checks.
+
+Catching that required reading the shipped world data and the node store, noticing
+the map-42 gap, and reasoning about `saveNodeStore` renumbering ids. Before
+dropping the lenses to `medium`, weigh that against the token savings: the review
+stage is where this workflow's autonomy is actually load-bearing, because nothing
+downstream re-checks whether the acceptance criteria were honestly met. Consider
+downgrading `verify` and `PR` first and leaving the lenses alone.
 
 The comparison worth making is tokens-per-tick at equal outcome quality: did the
 tuned run still produce a PR that survives review without extra round trips?
