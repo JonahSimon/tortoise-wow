@@ -1,5 +1,5 @@
 ---
-status: failed
+status: done
 risk: high
 area: playerbots/transport
 ---
@@ -60,10 +60,14 @@ and `GameObject.h:878` (type 11 has no `Transport` equivalent);
   disembarks — verified **in-game**, not just by code inspection.
 - The animation phase offset (where in the loop each car/lift actually is at
   a given server time) is measured in-game per the investigation doc's
-  calibration method — park a GM next to a car, log
-  `WorldTimer::getMSTime() % TotalTime` at the moment it reaches a known
-  end — and baked in as a per-entry epoch offset, so a bot-ridden car is in
-  phase with what real clients see.
+  calibration method — park a GM next to a car and, at the instant it reaches
+  the end corresponding to keyframe `TimeSeg` = `t_end`, log
+  `m = WorldTimer::getMSTime() % TotalTime` — and baked in as a per-entry epoch
+  offset, so a bot-ridden car is in phase with what real clients see. Store
+  `(t_end + TotalTime - m) % TotalTime`, **not** the raw `m`: the phase is
+  `(getMSTime() + EpochOffset) % TotalTime`, so the raw value is only correct
+  when `t_end` is 0 and otherwise miscalibrates the entry by `t_end`. (This
+  recipe originally said to store the logged value; corrected 2026-08-12.)
 
 **Notes:** Per `docs/playerbots/BOT-TRANSPORT-INVESTIGATION.md` ("D3"). This
 is the largest and only architecturally risky item in the investigation, and
@@ -142,9 +146,18 @@ Leave `GetAnimationTime()` keyed off `getMSTime()`.
    own recipe (lines 63–66) is under-specified the same way, so citing it does
    not settle this half — fix the artifact's recipe too.
 
-Neither requires redoing the implementation. Fix those two, then ship the branch;
-the in-game phase measurement remains outstanding by design and belongs in a
-follow-up artifact, not here.
+Neither required redoing the implementation. Both were fixed in commit `ee94803`
+on the same branch and the work was shipped — the artifact is `done`, not
+`failed`; the drain's `failed` verdict was overturned by hand.
+
+**Result:** PR opened at https://github.com/ChrisMiho/tortoise-wow/pull/16
+
+Still outstanding, deliberately, and called out in the PR body: nothing here is
+compiled or run, and every seeded entry ships `epoch_offset = 0`, so a
+bot-ridden car is on the right path in the right place at the wrong *time*
+until each entry is measured in-game with the corrected formula. That
+measurement, and confirming the ~49.7-day counter wrap behaviour, belong in a
+follow-up artifact rather than here.
 
 Worktree left at
 `D:/CodingProjects/tortoise-wow/tortoise-wow/.claude/worktrees/wf_5873c415-d92-1`,
