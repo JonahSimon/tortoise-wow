@@ -1,5 +1,5 @@
 ---
-status: pending
+status: failed
 risk: high
 area: playerbots/transport
 ---
@@ -72,3 +72,49 @@ must be verified in-game after the code lands, and should be the first thing
 checked. Depends on the `getTransports` guid/scan fix and the dock-hop
 transport-entry fix for the lookup path to find the right car/lift once it
 can move.
+
+**Failure notes:** blocking findings not addressed — but unlike `007`, this is a
+**technical dispute, not an impossibility**, and needs a human to settle it
+before the artifact is retried.
+
+A review lens flagged that `LocalTransport.cpp` keys its animation phase off
+`WorldTimer::getMSTime()` rather than wall-clock time. The implementer declined
+to change it, arguing the finding is a misdiagnosis:
+
+- `getMSTime()` is the clock the client's own type-11 animation loop is seeded
+  with. `src/game/Objects/Object.cpp:503–515` writes
+  `WorldTimer::getMSTime()` into the create block under `UPDATEFLAG_TRANSPORT`
+  for every gameobject that is not an MO-transport, and re-sends it on every
+  create block — so a per-entry epoch offset measured against it stays valid
+  across restarts.
+- Wall-clock time is never sent to a 1.12 client for these objects, so
+  switching to `time(nullptr)` the way `Transport::Create` does would anchor the
+  mirror to something no client can see, breaking phase agreement rather than
+  fixing it.
+- This artifact's own calibration recipe (lines 63–66) specifies logging
+  `getMSTime() % TotalTime`, which is consistent with the implementer's choice
+  rather than the reviewer's.
+
+The drain verified the central citation: `Object.cpp:503–515` does send
+`getMSTime()` for non-MO-transport gameobjects, and that block carries an
+existing `@TODO` noting type 11 is not handled there. So the dispute is
+grounded rather than hand-waving — but "grounded" is not "correct", and no one
+has confirmed phase agreement against a real 1.12 client. Resolve that
+question first; if the implementer is right, the fix is to the review
+criterion, not to the code.
+
+Commit `ea96243` documents this reasoning in
+`src/game/Transports/LocalTransport.h` and adds a DEBUG log in `AddPassenger`
+reporting how far the mirror sits from the parked pose, which is the
+measurement signal the calibration step needs. The remaining half of that
+acceptance criterion — measuring each entry's offset in-game — is not
+achievable from static analysis, as this artifact already states.
+
+Worktree left at
+`D:/CodingProjects/tortoise-wow/tortoise-wow/.claude/worktrees/wf_5873c415-d92-1`,
+branch `backlog/generic-transport-base-and-localtransport` (never pushed, so
+`ea96243` and the whole `LocalTransport` implementation exist only there — read
+it with `git -C <worktree> show ea96243` and review the branch before
+discarding anything). Remove both with `git worktree remove <path>` and
+`git branch -D backlog/generic-transport-base-and-localtransport` before
+resetting this artifact to pending.
