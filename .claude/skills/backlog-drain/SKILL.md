@@ -66,14 +66,48 @@ artifact before turning this loose on a real backlog — see
      drained.
    - Call `ScheduleWakeup({ stop: true })` and stop. Do not continue.
 5. Otherwise, pick the file with the lowest numeric prefix among those with
-   `status: pending`, ignoring any files without a valid 3-digit `NNN-`
-   numeric prefix.
+   `status: pending` (ignoring any files without a valid 3-digit `NNN-`
+   numeric prefix) **whose dependency is ready**:
+   - No `depends-on:` value (or blank) — ready, pick it.
+   - `depends-on: <NNN>-<slug>.md` set — read that file's frontmatter. Ready
+     only if its `status` is `done`. Anything else (`pending`, `in-progress`,
+     `contested`, `blocked`, `failed`, `out-of-scope`, or the file missing
+     entirely) means not ready: skip this candidate and check the
+     next-lowest-numbered pending file instead.
+   - If every remaining `pending` file is blocked on an unready dependency,
+     this is a terminal tick: report each blocked artifact by path and what
+     it's waiting on, call `ScheduleWakeup({ stop: true })`, and stop. Do not
+     pick anything. (A dependency cycle surfaces here too, indistinguishable
+     from an ordinary not-yet-drained dependency — both are reported the same
+     way and require a human to look.)
+5a. Resolve the base branch for the picked artifact:
+   - No `depends-on:` — `baseBranch: "cm-main"`, no `dependsOnPrUrl`.
+   - `depends-on:` set (and therefore, per step 5, that dependency's
+     `status: done`) — determine whether its PR already merged:
+     ```
+     git fetch origin cm-main
+     git merge-base --is-ancestor origin/backlog/<dep-slug> origin/cm-main
+     ```
+     Exit code `0` means it already merged — use `baseBranch: "cm-main"`
+     (nothing left to stack on). Non-zero means it's still open — use
+     `baseBranch: "backlog/<dep-slug>"`, and read the dependency artifact's
+     `**Result:** PR opened at <url>` line for `dependsOnPrUrl`.
+
+     If the `git merge-base` command itself errors — rather than cleanly
+     exiting non-zero for "not an ancestor" — do not treat that as either
+     "merged" or "still open". This happens when `origin/backlog/<dep-slug>`
+     doesn't exist on the remote at all, which can only mean the dependency
+     artifact's `status: done` is stale or wrong (the branch was deleted
+     after merging, or never pushed). Treat the dependency as **not ready**:
+     log a warning naming the missing branch and fall through to the
+     next-lowest-numbered pending artifact, exactly as step 5 does for a
+     dependency whose `status` isn't `done`.
 6. Edit that file's frontmatter to `status: in-progress` before doing anything
    else, so a crash mid-tick can't cause it to be picked again.
 7. Run the workflow against it, passing an **absolute** `artifactPath`:
 
    ```
-   Workflow({ name: "backlog-issue", args: { artifactPath: "<absolute path to that file>", dryRun: false } })
+   Workflow({ name: "backlog-issue", args: { artifactPath: "<absolute path to that file>", dryRun: false, baseBranch: "<resolved in step 5a>", dependsOnPrUrl: "<resolved in step 5a, or omit if none>" } })
    ```
 
    Build the absolute path from the repo root (`git rev-parse --show-toplevel`)
@@ -271,6 +305,9 @@ walking away: every non-dry-run tick pushes a branch and opens a PR.
   tick (never silently ignored) but never auto-recovered: check whether a PR
   was already opened for it before resetting its `status` to `pending` by
   hand, and clean up its worktree and branch first, exactly as for `failed`.
-- Branches are independent — each is cut fresh from
-  `origin/cm-main` when its tick starts, never from another
-  backlog branch.
+- Branches are cut fresh from `origin/cm-main` when their tick starts, unless
+  the artifact declares `depends-on:` on a still-unmerged dependency — see
+  `docs/backlog/README.md#dependencies` — in which case the branch is cut
+  from the dependency's branch instead. Independent artifacts (no
+  `depends-on:`, or one whose dependency already merged) keep the original
+  failure isolation: one artifact failing costs nothing to any other branch.

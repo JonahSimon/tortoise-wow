@@ -129,9 +129,36 @@ if (normalizedArgs.dryRun === false) {
 
 // This fork's trunk is cm-main, not playerbots-integration-gh -- the latter is a
 // pristine fast-forward-only mirror of upstream that is never committed to
-// directly (see docs/BRANCHING.md). Every branch/diff/PR-base below must point
-// at cm-main.
-const BASE_BRANCH = 'cm-main'
+// directly (see docs/BRANCHING.md).
+//
+// BASE_BRANCH is normally cm-main, but backlog-drain resolves it to a
+// dependency's own backlog/<slug> branch when the artifact declares
+// depends-on: and that dependency's PR hasn't merged yet -- targeted
+// stacking, not a fresh cm-main cut every tick. Every phase below already
+// references BASE_BRANCH by template literal, so this is the only line that
+// needs to change for stacking to propagate through Implement/Review/Verify/PR.
+//
+// Validated rather than trusted, same reasoning as branchName below: this
+// flows straight into "git fetch", "git diff", and "gh pr create --base", so
+// an unexpected value fails safe to cm-main rather than being passed through.
+const BASE_BRANCH_PATTERN = /^(cm-main|backlog\/[a-z0-9][a-z0-9_-]*)$/
+const requestedBaseBranch = typeof normalizedArgs.baseBranch === 'string' ? normalizedArgs.baseBranch.trim() : ''
+let BASE_BRANCH
+if (BASE_BRANCH_PATTERN.test(requestedBaseBranch)) {
+  BASE_BRANCH = requestedBaseBranch
+} else {
+  if (requestedBaseBranch) {
+    log(`baseBranch was not a recognized ref (got ${JSON.stringify(normalizedArgs.baseBranch)}) -- defaulting to cm-main`)
+  }
+  BASE_BRANCH = 'cm-main'
+}
+
+// Only meaningful when BASE_BRANCH !== 'cm-main' -- the dependency's PR URL,
+// so the PR phase can link it in a stacked PR's body. Not validated as
+// strictly as PR_URL_PATTERN below (it's advisory text in a PR body, not a
+// value this script acts on), but coerced to a string so a non-string value
+// can't break the template literal it's interpolated into.
+const dependsOnPrUrl = typeof normalizedArgs.dependsOnPrUrl === 'string' ? normalizedArgs.dependsOnPrUrl.trim() : ''
 
 // gh commands without an explicit --repo resolve against whichever remote GitHub
 // considers the fork's parent (upstream), not this fork -- also documented in
@@ -283,6 +310,11 @@ if (dryRun) {
   return { success: true, dryRun: true, branchName, verifyNote: verifyNote || '' }
 }
 
+const stackedSection = BASE_BRANCH !== 'cm-main'
+  ? `
+   0. A line before everything else: "Stacked on ${dependsOnPrUrl || BASE_BRANCH} — merge that first; this PR's diff will shrink once it does."`
+  : ''
+
 // Minor review findings are non-blocking, but this repo has no CI, so the human
 // reading the PR is the only one who will ever see them. Surface them there.
 const minorSection = minor.length > 0
@@ -305,7 +337,7 @@ const prResult = await agent(
 
    Title: a short summary of the fix, in this repo's existing commit-message voice.
 
-   Body must include, in this order:
+   Body must include, in this order:${stackedSection}
    1. The backlog artifact this implements: ${artifactLabel}
    2. Problem, quoted verbatim: "${implemented.problem}"
    3. Summary of the change made: ${implemented.summary}
