@@ -4,8 +4,6 @@ export const meta = {
   phases: [
     { title: 'Implement' },
     { title: 'Review' },
-    { title: 'Verify' },
-    { title: 'PR' },
   ],
 }
 
@@ -44,8 +42,9 @@ const IMPLEMENT_SCHEMA = {
     acceptanceCriteria: { type: 'string' },
     blocked: { type: 'boolean' },
     blockedReason: { type: 'string' },
+    inGameCheck: { type: 'string' },
   },
-  required: ['branchName', 'summary', 'problem', 'acceptanceCriteria'],
+  required: ['branchName', 'summary', 'problem', 'acceptanceCriteria', 'inGameCheck'],
 }
 
 const FIX_SCHEMA = {
@@ -57,22 +56,14 @@ const FIX_SCHEMA = {
   required: ['fixed'],
 }
 
-const PR_SCHEMA = {
-  type: 'object',
-  properties: {
-    prUrl: { type: 'string' },
-  },
-  required: ['prUrl'],
-}
-
-// The Implement phase's branch name flows straight into a real "git push", so it
-// is validated rather than trusted. backlog-scope slugifies titles to lowercase
+// The Implement phase's branch name flows straight into a real "git push" in a
+// later batch step, so it is validated rather than trusted here. backlog-scope
+// slugifies titles to lowercase
 // words joined by hyphens, and the branch slug is that filename minus its NNN-
 // prefix and .md suffix, so a well-formed branch is always backlog/<slug>.
 // Underscores are tolerated; dots are not, because they would allow ".." and a
 // trailing ".lock" -- both of which git rejects in a ref anyway.
 const BRANCH_NAME_PATTERN = /^backlog\/[a-z0-9][a-z0-9_-]*$/
-const PR_URL_PATTERN = /^https:\/\/github\.com\/[^\s/]+\/[^\s/]+\/pull\/\d+\/?$/
 
 // Turn whatever an agent actually returned into something short and printable,
 // so a rejected result is debuggable from the drain skill's failure notes.
@@ -115,21 +106,6 @@ const artifactLabel = backlogDirIndex >= 0
   ? normalizedArtifactPath.slice(backlogDirIndex)
   : normalizedArtifactPath.slice(normalizedArtifactPath.lastIndexOf('/') + 1)
 
-// dryRun must be explicitly true or false. Any other value (missing,
-// malformed, a truthy-but-non-boolean value) fails safe toward dryRun: true
-// rather than silently falling through to a real push+PR -- a plain
-// Boolean(args.dryRun) coercion previously turned a missing/undefined
-// dryRun into `false` (the dangerous direction) and did exactly that.
-let dryRun
-if (normalizedArgs.dryRun === false) {
-  dryRun = false
-} else {
-  if (normalizedArgs.dryRun !== true) {
-    log(`dryRun was not explicitly true or false (got ${JSON.stringify(normalizedArgs.dryRun)}) -- defaulting to dryRun: true (safe) rather than risking a real push+PR`)
-  }
-  dryRun = true
-}
-
 // This fork's trunk is cm-main, not playerbots-integration-gh -- the latter is a
 // pristine fast-forward-only mirror of upstream that is never committed to
 // directly (see docs/BRANCHING.md).
@@ -139,11 +115,11 @@ if (normalizedArgs.dryRun === false) {
 // depends-on: and that dependency's PR hasn't merged yet -- targeted
 // stacking, not a fresh cm-main cut every tick. Every phase below already
 // references BASE_BRANCH by template literal, so this is the only line that
-// needs to change for stacking to propagate through Implement/Review/Verify/PR.
+// needs to change for stacking to propagate through Implement/Review.
 //
 // Validated rather than trusted, same reasoning as branchName below: this
-// flows straight into "git fetch", "git diff", and "gh pr create --base", so
-// an unexpected value fails safe to cm-main rather than being passed through.
+// flows straight into "git fetch" and "git diff", so an unexpected value
+// fails safe to cm-main rather than being passed through.
 const BASE_BRANCH_PATTERN = /^(cm-main|backlog\/[a-z0-9][a-z0-9_-]*)$/
 const requestedBaseBranch = typeof normalizedArgs.baseBranch === 'string' ? normalizedArgs.baseBranch.trim() : ''
 let BASE_BRANCH
@@ -155,19 +131,6 @@ if (BASE_BRANCH_PATTERN.test(requestedBaseBranch)) {
   }
   BASE_BRANCH = 'cm-main'
 }
-
-// Only meaningful when BASE_BRANCH !== 'cm-main' -- the dependency's PR URL,
-// so the PR phase can link it in a stacked PR's body. Not validated as
-// strictly as PR_URL_PATTERN below (it's advisory text in a PR body, not a
-// value this script acts on), but coerced to a string so a non-string value
-// can't break the template literal it's interpolated into.
-const dependsOnPrUrl = typeof normalizedArgs.dependsOnPrUrl === 'string' ? normalizedArgs.dependsOnPrUrl.trim() : ''
-
-// gh commands without an explicit --repo resolve against whichever remote GitHub
-// considers the fork's parent (upstream), not this fork -- also documented in
-// docs/BRANCHING.md. An unattended PR-create call must pin this explicitly or it
-// can silently target the wrong repository.
-const GH_REPO = 'ChrisMiho/tortoise-wow'
 
 phase('Implement')
 const implemented = await agent(
@@ -211,6 +174,19 @@ const implemented = await agent(
    partial implementation to make the criteria look satisfied when they
    aren't really verifiable.
 
+   Describe, concretely, how a human would confirm this fix actually works
+   in-game once it's running on a live server -- specific enough to follow as
+   a checklist (e.g. "board the Menethil Harbor - Theramore boat as a bot and
+   confirm it doesn't fall through the deck", not "test transports"). If part
+   of that check could be confirmed from server logs or console output rather
+   than requiring a human to look (e.g. a specific log line, an absence of a
+   specific error), say so explicitly -- a later batch step will attempt
+   whatever's actually scriptable and leave the rest for manual testing.
+   Return this as inGameCheck. Every artifact needs one, even a low-risk
+   change -- if you're confident it needs no in-game confirmation beyond the
+   generic "server starts, bots spawn" smoke test, say that explicitly rather
+   than leaving it vague.
+
    Return:
    - the exact branch name you created
    - a one-paragraph summary of the change you made
@@ -234,10 +210,10 @@ if (implemented.blocked === true) {
   }
 }
 
-// Everything downstream -- including a real "git push" -- trusts this string.
-// If the agent handed back the base branch (or anything else that isn't the
-// backlog/<slug> branch it was told to create), stop here rather than pushing
-// to whatever ref it named.
+// Everything downstream -- including a later batch step's real "git push" --
+// trusts this string. If the agent handed back the base branch (or anything
+// else that isn't the backlog/<slug> branch it was told to create), stop here
+// rather than letting a bad ref reach that push.
 const branchName = typeof implemented.branchName === 'string' ? implemented.branchName.trim() : ''
 if (!BRANCH_NAME_PATTERN.test(branchName)) {
   return {
@@ -325,90 +301,6 @@ if (blocking.length > 0) {
   }
 }
 
-phase('Verify')
-const verifyNote = await agent(
-  `Check whether a C++ build toolchain (cmake plus a compiler) is available in this
-   environment. If so, attempt to configure and build the affected target from branch
-   "${branchName}". Branch refs are shared across worktrees in this
-   repository, but building needs actual files on disk: locate an existing checkout of
-   that branch with "git worktree list" (the Implement phase's worktree, not yet
-   cleaned up) rather than assuming your current directory has it checked out, and
-   confirm you're on the right commit ("git rev-parse HEAD" should match "git rev-parse
-   ${branchName}") before concluding anything about whether it builds.
-   Report whether the build succeeded. If no toolchain is available, or a build isn't
-   reasonably feasible here, say so plainly rather than implying it compiles. Keep the
-   answer to 2-3 sentences — it goes verbatim into a PR description.`,
-  { phase: 'Verify', label: 'verify', model: 'sonnet', effort: 'low' }
-)
-
-phase('PR')
-if (dryRun) {
-  log(`[dry run] would push ${branchName} and open a PR against ${BASE_BRANCH} on ${GH_REPO}`)
-  return { success: true, dryRun: true, branchName, verifyNote: verifyNote || '' }
-}
-
-const stackedSection = BASE_BRANCH !== 'cm-main'
-  ? `
-   0. A line before everything else: "Stacked on ${dependsOnPrUrl || BASE_BRANCH} — merge that first; this PR's diff will shrink once it does."`
-  : ''
-
-// Minor review findings are non-blocking, but this repo has no CI, so the human
-// reading the PR is the only one who will ever see them. Surface them there.
-const minorSection = minor.length > 0
-  ? `
-   7. A section headed "Automated review — non-blocking findings", listing exactly
-      these and nothing else, one bullet per line:
-${minor.map((f) => `      - ${f.file}: ${f.summary}`).join('\n')}`
-  : ''
-
-const contestedSection = contestedFindings
-  ? `
-   ${minorSection ? '8' : '7'}. A section headed "Contested — needs manual adjudication", explaining
-      that a review finding and the implementer disagreed and neither could be
-      resolved automatically, then listing exactly these and nothing else, one
-      bullet per line:
-${contestedFindings.map((u) => `      - ${u}`).join('\n')}`
-  : ''
-
-const prResult = await agent(
-  `Push branch "${branchName}" to origin, then open a pull request for it
-   against base branch ${BASE_BRANCH}. Branch refs are shared across
-   worktrees in this repository, so you do not need to check out or locate that
-   branch's worktree first -- from your current checkout, run "git push origin
-   ${branchName}" directly, then "gh pr create --repo ${GH_REPO} --head ${branchName}
-   --base ${BASE_BRANCH}" with the title and body below (the explicit
-   --repo/--head/--base flags avoid gh's default of resolving against upstream
-   instead of this fork, and avoid relying on whichever branch happens to be
-   checked out where you're running).
-
-   Title: ${contestedFindings ? '"[contested] " followed by a' : 'a'} short summary of the fix, in this repo's existing commit-message voice.
-
-   Body must include, in this order:${stackedSection}
-   1. The backlog artifact this implements: ${artifactLabel}
-   2. Problem, quoted verbatim: "${implemented.problem}"
-   3. Summary of the change made: ${implemented.summary}
-   4. Acceptance criteria, quoted verbatim: "${implemented.acceptanceCriteria}"
-   5. This verification note, verbatim: "${verifyNote || 'not available'}"
-   6. A line stating manual in-game testing is still required before merge${minorSection}${contestedSection}
-
-   Return the URL of the pull request you opened, and nothing else in that field.
-   If you could not push or could not open the PR, say so in prUrl rather than
-   inventing a URL — the caller checks that it is a real GitHub PR URL.`,
-  { phase: 'PR', label: 'open-pr', schema: PR_SCHEMA, model: 'sonnet', effort: 'low' }
-)
-
-// Without this check any truthy text -- including "I couldn't create the PR
-// because ..." -- would be recorded as a successfully opened PR.
-const prUrl = prResult && typeof prResult === 'object' ? prResult.prUrl : prResult
-const trimmedPrUrl = typeof prUrl === 'string' ? prUrl.trim() : ''
-if (!PR_URL_PATTERN.test(trimmedPrUrl)) {
-  return {
-    success: false,
-    reason: `PR phase did not return a pull request URL, got: ${describe(prResult)}`,
-    branchName,
-  }
-}
-
 return contestedFindings
-  ? { success: true, contested: true, branchName, prUrl: trimmedPrUrl }
-  : { success: true, branchName, prUrl: trimmedPrUrl }
+  ? { success: true, contested: true, contestedFindings, branchName, summary: implemented.summary, problem: implemented.problem, acceptanceCriteria: implemented.acceptanceCriteria, inGameCheck: implemented.inGameCheck, minorFindings: minor }
+  : { success: true, branchName, summary: implemented.summary, problem: implemented.problem, acceptanceCriteria: implemented.acceptanceCriteria, inGameCheck: implemented.inGameCheck, minorFindings: minor }
