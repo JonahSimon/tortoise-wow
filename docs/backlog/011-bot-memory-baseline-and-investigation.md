@@ -56,9 +56,9 @@ layout and carry the specific defects listed below.
 |---|---|---|
 | `scripts/task3-ramp-step.sh` | The ramp itself: `apply` sets Min/MaxRandomBots and restarts mangosd, `gates` dumps `free -h` + `docker stats` + online count, `wait` blocks until a threshold. | `ROOT=/home/deck/tortoise-wow-server-V2` is hardcoded — make it an env override. Output is human-readable tables, not parseable rows; it needs a CSV mode before any curve can be fitted. The name is a leftover from an old task list and should be renamed. |
 | `scripts/wait-rndbots-online.sh` | Plateau detection — a sample taken mid-login is not a plateau. Handles container status better than `task3`'s `wait`. | Duplicates `task3-ramp-step.sh wait`. Collapse into one implementation. |
-| `scripts/lib/botdb.sh` | Read-only queries against `tw2-db`. Env-overridable already. | None known. |
+| `scripts/lib/botdb.sh` | Read-only queries against `tcm-db`. Env-overridable already. | None known. |
 | `scripts/lib/provenance.sh`, `scripts/verify-running-commit.sh` | Proves the running image was built from the commit under test. **Before/after memory numbers are meaningless without this.** | Two mismatches against the current `Dockerfile`/`rebuild.sh` — see below. Both must be fixed before the script is trusted. |
-| `scripts/ai-dev-profile.sh` | Stops mangosd + realmd, keeps `tw2-db` up. This is how the **bot-free intercept** gets measured, and how RAM is freed for a build. | Paths only. |
+| `scripts/ai-dev-profile.sh` | Stops mangosd + realmd, keeps `tcm-db` up. This is how the **bot-free intercept** gets measured, and how RAM is freed for a build. | Paths only. |
 | `scripts/backup-alive-world-pre.sh` | Snapshots `aiplayerbot.conf` and friends before the ramp mutates them. | Writes to `/mnt/d/TurtleWow/backups`, which may not exist on this host. |
 | `scripts/check-build-progress.sh` | Progress on a multi-hour unattended build. | Hardcoded to one historical build's log path. |
 | `scripts/bot-progression/{snapshot,report,churn-report,describe}.sh` | **The capability-regression instrument** — levels gained per logged-in hour, pool churn ratio, level bands, with pass/fail thresholds. | None known. |
@@ -150,12 +150,12 @@ proposed as one without being labelled capability-affecting. Making bots
 prefer optimizations that leave headroom for that rather than spend it.
 
 *Build path.* `scripts/rebuild.sh` is the only supported build: it builds from
-**this** checkout to `tortoise-v2:candidate`, runs five acceptance checks, and
+**this** checkout to `tortoise-cm:candidate`, runs five acceptance checks, and
 moves the `:local` tag only if all pass. It must run **from WSL, not Git Bash**
 (it fails closed on `MSYSTEM`, because MSYS path rewriting once produced five
 false FAILs after a successful 40-minute compile). Budget ~40 minutes.
 `docker compose build` is a silent no-op — `docker-compose.yml` pins
-`image: tortoise-v2:local` with no `build:` key. The instrumented
+`image: tortoise-cm:local` with no `build:` key. The instrumented
 `MEMORY_MONITOR` build therefore costs a full cold compile, and cannot run
 while the server is up: the heavy playerbot translation units want 1.5-2.5 GiB
 per `g++` and the build OOMs above `-j2`, so bring the stack down with

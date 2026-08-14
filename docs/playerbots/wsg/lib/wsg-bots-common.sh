@@ -68,25 +68,25 @@ wsg_ensure_match_conf() {
 }
 
 wsg_db_pass() {
-  # Preferred: .dbpass in the server checkout. Fallback: ask tw2-db itself —
+  # Preferred: .dbpass in the server checkout. Fallback: ask tcm-db itself —
   # the checkout may live elsewhere (or not exist) on this machine, and every
-  # caller only ever talks to the tw2-db container anyway.
+  # caller only ever talks to the tcm-db container anyway.
   if [[ -r "${WSG_SERVER_ROOT}/.dbpass" ]]; then
     tr -d '\r\n' < "${WSG_SERVER_ROOT}/.dbpass"
   else
-    docker exec tw2-db printenv MARIADB_ROOT_PASSWORD 2>/dev/null | tr -d '\r\n'
+    docker exec tcm-db printenv MARIADB_ROOT_PASSWORD 2>/dev/null | tr -d '\r\n'
   fi
 }
 
 wsg_mysql() {
   local sql="$1"
-  docker exec -e MYSQL_PWD="$(wsg_db_pass)" tw2-db mysql -uroot -N -B -e "$sql" 2>/dev/null | tr -d '\r'
+  docker exec -e MYSQL_PWD="$(wsg_db_pass)" tcm-db mysql -uroot -N -B -e "$sql" 2>/dev/null | tr -d '\r'
 }
 
-# Sends lines to the tw2-mangosd console and detaches cleanly.
+# Sends lines to the tcm-mangosd console and detaches cleanly.
 # NEVER let docker attach's stdin reach EOF without detaching first:
 # mangosd treats console EOF as "shut down the world" and the compose
-# service is restart:"no" (recovery: docker start tw2-mangosd).
+# service is restart:"no" (recovery: docker start tcm-mangosd).
 # The pty wrapper (`script`) is required because the container runs with
 # tty=true, and plain piped `docker attach` refuses non-tty stdin.
 # Console commands take NO leading dot and run as console security.
@@ -103,7 +103,7 @@ wsg_mysql() {
 wsg_console() {
   local cmds="$1" wait_s="${2:-4}"
   { printf '%s\n' "$cmds"; sleep "$wait_s"; printf '\x10\x11'; sleep 1; } \
-    | timeout $((wait_s + 20)) script -qec 'docker attach --detach-keys "ctrl-p,ctrl-q" tw2-mangosd' /dev/null \
+    | timeout $((wait_s + 20)) script -qec 'docker attach --detach-keys "ctrl-p,ctrl-q" tcm-mangosd' /dev/null \
     | tr -d '\r' || true
   return 0
 }
@@ -171,7 +171,7 @@ wsg_wait_world_ready() {
   while (( SECONDS < deadline )); do
     if (
       set +o pipefail
-      docker logs tw2-mangosd --since "$(date -u -d '-5 minutes' +%Y-%m-%dT%H:%M:%SZ)" 2>&1 \
+      docker logs tcm-mangosd --since "$(date -u -d '-5 minutes' +%Y-%m-%dT%H:%M:%SZ)" 2>&1 \
         | grep -qa "$marker"
     ); then
       echo "world ready (${marker} seen in the last 5 minutes)"
@@ -180,7 +180,7 @@ wsg_wait_world_ready() {
     sleep 5
   done
   echo "ERROR: mangosd did not log ${marker} within ${timeout_s}s of restarting." >&2
-  echo "Check: docker ps, then docker logs tw2-mangosd --tail 50" >&2
+  echo "Check: docker ps, then docker logs tcm-mangosd --tail 50" >&2
   return 1
 }
 

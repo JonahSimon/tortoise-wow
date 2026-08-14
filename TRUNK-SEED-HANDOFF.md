@@ -68,8 +68,8 @@ ahead of `main`; `main` is 9 commits behind `origin/main`. The dump captured onl
   | `previous` | `4db3412224fd` | last pre-stamping build |
   | `pristine` | `7918a9e7c510` | untouched upstream build |
 
-- Compose pins the mutable `tortoise-v2:local`, so **rollback is a re-tag**, not a rebuild:
-  `docker tag tortoise-v2:previous tortoise-v2:local && docker compose up -d`.
+- Compose pins the mutable `tortoise-cm:local`, so **rollback is a re-tag**, not a rebuild:
+  `docker tag tortoise-cm:previous tortoise-cm:local && docker compose up -d`.
 
 **Open question for the owner:** does the new trunk reuse this volume, or start clean?
 That single decision determines whether the roster and 4,541 characters are an asset or

@@ -38,7 +38,7 @@ done
 wsg_load_roster "$ROSTER"
 
 # --- preflight ---------------------------------------------------------------
-wsg_check_db || { echo "FATAL: DB unreachable via tw2-db" >&2; exit 1; }
+wsg_check_db || { echo "FATAL: DB unreachable via tcm-db" >&2; exit 1; }
 
 online=0
 while read -r _ on _; do [[ "$on" == "1" ]] && online=$((online+1)); done < <(wsg_team_status)

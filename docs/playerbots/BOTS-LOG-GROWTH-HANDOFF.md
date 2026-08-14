@@ -166,7 +166,7 @@ as they did before `BotLog` existed.
 ### Step 3 — restart mangosd and verify
 
 ```bash
-docker restart tw2-mangosd     # ~1 min to load; don't do this mid-match
+docker restart tcm-mangosd     # ~1 min to load; don't do this mid-match
 ```
 
 Wait ~5 minutes with bots active, then:
@@ -317,7 +317,7 @@ live repro.
 | Rely on `logrotate.timer`'s daily run alone | 30 GB of growth between checks |
 | Assume `LogLevel` / `LogFileLevel` control this | §2 — `BotLog` bypasses both |
 | Assume `LogInGroupOnly` will fix it | Already on by default; BG bots are grouped |
-| `docker restart tw2-mangosd` mid-match | Bots take minutes to come back and the roster needs re-adding |
+| `docker restart tcm-mangosd` mid-match | Bots take minutes to come back and the roster needs re-adding |
 
 ---
 

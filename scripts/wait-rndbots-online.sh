@@ -7,8 +7,8 @@ TARGET="${1:-45}"
 MAX_ITERS="${2:-36}"
 
 for i in $(seq 1 "$MAX_ITERS"); do
-  status=$(docker inspect -f '{{.State.Status}}' tw2-mangosd 2>/dev/null || echo missing)
-  online=$(docker exec -e MYSQL_PWD="$PASS" tw2-db mysql -uroot -N -B -e \
+  status=$(docker inspect -f '{{.State.Status}}' tcm-mangosd 2>/dev/null || echo missing)
+  online=$(docker exec -e MYSQL_PWD="$PASS" tcm-db mysql -uroot -N -B -e \
     "SELECT COUNT(*) FROM tw_char.characters c JOIN tw_logon.account a ON a.id=c.account WHERE a.username LIKE 'RNDBOT%' AND c.online=1;" \
     2>/dev/null | tr -d '\r')
   echo "$(date -u +%H:%M:%S) status=$status online=${online:-err}"

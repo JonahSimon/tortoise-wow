@@ -350,7 +350,7 @@ AiPlayerbot.RandomBotUpdateInterval = 500
 
 ## 7. Rebuilding — read before touching C++
 
-The compiled server lives **inside the image** `tortoise-v2:local`, which the setup handoff
+The compiled server lives **inside the image** `tortoise-cm:local`, which the setup handoff
 correctly calls irreplaceable (expected ID
 `sha256:0a13a2be94fca3ce5cebc4f9968fb92a6e7c0e1900419b7b16ce110f92935ff5`). A rebuild
 overwrites that tag.
@@ -358,7 +358,7 @@ overwrites that tag.
 **Tag a backup first, before any build:**
 
 ```bash
-docker tag tortoise-v2:local tortoise-v2:pristine
+docker tag tortoise-cm:local tortoise-cm:pristine
 ```
 
 Then edit the C++ under `~/tortoise-wow-server-V2/src` **inside WSL** — not the reference
@@ -520,7 +520,7 @@ The login path is heavily instrumented and logs every failure explicitly
 (`PlayerbotMgr.cpp:54-227`):
 
 ```bash
-docker logs tw2-mangosd 2>&1 | grep -E "\[PlayerBots\]|DEBUG group:"
+docker logs tcm-mangosd 2>&1 | grep -E "\[PlayerBots\]|DEBUG group:"
 ```
 
 Strings worth knowing:
@@ -542,7 +542,7 @@ SQL — does the character even exist?
 
 ```bash
 cd ~/tortoise-wow-server-V2
-docker exec tw2-db mariadb -uroot -p"$(cat .dbpass)" -N -B -e \
+docker exec tcm-db mariadb -uroot -p"$(cat .dbpass)" -N -B -e \
   "SELECT guid,name,race,class,level,account FROM tw_char.characters WHERE name='Floto';"
 ```
 
@@ -602,7 +602,7 @@ once — `AddPlayerBot` resolves the bot's account through the same cache, so wi
 bot can never come online no matter what `login=` is set to. Prefer this over
 `botSession->SetPlayer(newBot)`, which would drag the whole `LogoutPlayer` teardown into a
 session that was never really logged in. Applied on Local 2026-08-09
-(`tortoise-v2:local` `27b6f334c6ff…`; see `PLAYERBOT-COMMAND-FIX-HANDOFF.md`).
+(`tortoise-cm:local` `27b6f334c6ff…`; see `PLAYERBOT-COMMAND-FIX-HANDOFF.md`).
 
 ### Proper fix (Tier 3, only needed for full robustness)
 
@@ -620,7 +620,7 @@ command that also defaults `login=1` in a later build.
 ## 9. Hard rules
 
 - `.rndbot` for creating bots, not `.bot` — otherwise bots consume your own 9 character slots.
-- `docker tag tortoise-v2:local tortoise-v2:pristine` **before** any rebuild.
+- `docker tag tortoise-cm:local tortoise-cm:pristine` **before** any rebuild.
 - Edit C++ in WSL at `~/tortoise-wow-server-V2/src`, not the reference copy on `D:`.
 - Config and SQL changes never need a rebuild. Exhaust tiers 1 and 2 first.
 - `BUILD_PLAYERBOTS=ON` and `ALLOW_TURTLE_ADDONS=ON` must survive any CMake change.

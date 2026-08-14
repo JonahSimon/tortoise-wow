@@ -200,9 +200,9 @@ const validated = await agent(
    If Docker is ready: bring the stack up with the ${imageTag} image by
    running "TW_IMAGE=${imageTag} docker compose up -d" -- docker-compose.yml
    resolves the server image via the TW_IMAGE env var (default
-   tortoise-v2:local), so a bare "docker compose up" silently reuses whatever
+   tortoise-cm:local), so a bare "docker compose up" silently reuses whatever
    was built previously instead of this batch's image. (Compose project name
-   is pinned to tortoise-wow-v2; tortoise-wow-v2_dbdata is an external
+   is pinned to tortoise-cm; tortoise-wow-v2_dbdata is an external
    volume -- never use "docker compose down -v", that volume is the entire
    world.) This is a single-developer, no-live-players development server --
    you are not simulating a player, just confirming the server comes up
@@ -298,7 +298,7 @@ ${item.minorFindings.map((line) => `      ${line}`).join('\n')}`
         docker compose up against this image to test (docker-compose.yml
         resolves the image via TW_IMAGE; a bare 'docker compose up' silently
         reuses whatever was built previously). Compose project is
-        tortoise-wow-v2." Followed by this line, verbatim: "This image
+        tortoise-cm." Followed by this line, verbatim: "This image
         contains every artifact in build ${buildId} merged together, not
         just this PR's change alone — if something looks off while testing,
         it may belong to a batch-mate rather than this PR."

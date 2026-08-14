@@ -9,7 +9,7 @@ PASS=$(cat "$ROOT/.dbpass")
 cd "$ROOT"
 
 online_count() {
-  docker exec -e MYSQL_PWD="$PASS" tw2-db mysql -uroot -N -B -e \
+  docker exec -e MYSQL_PWD="$PASS" tcm-db mysql -uroot -N -B -e \
     "SELECT COUNT(*) FROM tw_char.characters c JOIN tw_logon.account a ON a.id=c.account WHERE a.username LIKE 'RNDBOT%' AND c.online=1;"
 }
 

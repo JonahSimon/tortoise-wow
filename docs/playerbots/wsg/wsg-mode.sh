@@ -128,7 +128,7 @@ JSON
 
     echo "WSG match mode ON. Recommended before large world-DB changes: Backup-TurtleDatabase -IncludeWorld"
     if [[ "$RESTART" -eq 1 ]]; then
-      docker restart tw2-mangosd
+      docker restart tcm-mangosd
       wsg_wait_world_ready || exit 1
       if [[ "${WSG_SKIP_ROSTER:-0}" != "1" ]]; then
         bash "$SCRIPT_DIR/wsg-roster.sh" ensure
@@ -140,7 +140,7 @@ JSON
         wsg_console "$(printf 'rndbot rpg %s\n' "${WSG_NAMES[@]}")" 20 >/dev/null
       fi
     else
-      echo "ACTION REQUIRED: docker restart tw2-mangosd   (battleground_template is read at boot)"
+      echo "ACTION REQUIRED: docker restart tcm-mangosd   (battleground_template is read at boot)"
       echo "Then: wsg-roster.sh ensure"
     fi
     ;;
@@ -195,8 +195,8 @@ JSON
     [[ -f "$SNAP" ]] && mv "$SNAP" "${SNAP%.json}.$(date -u +%Y%m%dT%H%M%SZ).json"
 
     echo "Alive world restored. The pool climbs back to ${MaxRandomBots} over ~20 minutes."
-    if [[ "$RESTART" -eq 1 ]]; then docker restart tw2-mangosd
-    else echo "ACTION REQUIRED: docker restart tw2-mangosd"; fi
+    if [[ "$RESTART" -eq 1 ]]; then docker restart tcm-mangosd
+    else echo "ACTION REQUIRED: docker restart tcm-mangosd"; fi
     ;;
 
   *) usage ;;

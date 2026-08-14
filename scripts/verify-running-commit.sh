@@ -68,10 +68,29 @@ echo "built dirty: ${IMG_DIRTY:-unknown}"
 
 rc=0
 
-if [[ "$IMG_REV" != "$HEAD_SHA" ]]; then
+# Resolve the stamped revision inside this repo before comparing. This both
+# normalises short-vs-full SHAs (rebuild.sh stamps --short, HEAD_SHA is full,
+# so a raw string compare always differs) and catches an image built by a
+# different checkout publishing into the same image namespace.
+IMG_REV_FULL=$(prov_resolve_rev "$IMG_REV" || true)
+
+if [[ -z "$IMG_REV_FULL" ]]; then
+    echo
+    echo "VERDICT: FOREIGN — the running server is stamped with revision"
+    echo "           $IMG_REV"
+    echo "         which is not a commit in this repository. It was built from a"
+    echo "         different checkout that shares this image namespace."
+    echo
+    echo "  Nothing about this image describes code in this tree. Do not measure"
+    echo "  against it, and do not treat a passing smoke test as evidence here."
+    echo "  Build from this checkout:  scripts/rebuild.sh"
+    exit 1
+fi
+
+if [[ "$IMG_REV_FULL" != "$HEAD_SHA" ]]; then
     echo
     echo "VERDICT: DRIFT — the running server was built from"
-    echo "           $IMG_REV"
+    echo "           $IMG_REV ($IMG_REV_FULL)"
     echo "         but HEAD is"
     echo "           $HEAD_SHA"
     echo
@@ -89,10 +108,17 @@ if [[ -n "$IMG_DF" && "$IMG_DF" != "$DF_SHA" ]]; then
     rc=1
 fi
 
-if [[ "$IMG_DIRTY" == "true" ]]; then
+# rebuild.sh stamps this from `git status --porcelain | wc -l`, i.e. a COUNT
+# ("0", "3"), never the string "true" this once tested for — so the warning
+# never fired on a genuinely dirty build. Anything that is neither empty nor
+# zero means uncommitted changes went into the image. Note rebuild.sh counts
+# with --untracked-files=no while prov_is_dirty() above counts untracked files
+# too: the local check is deliberately stricter than the stamp, because an
+# untracked .cpp is still in the build context.
+if [[ -n "$IMG_DIRTY" && "$IMG_DIRTY" != "0" && "$IMG_DIRTY" != "unknown" ]]; then
     echo
-    echo "WARNING: this image was built from a dirty tree, so its revision label"
-    echo "         does not fully describe the binary."
+    echo "WARNING: this image was built from a dirty tree ($IMG_DIRTY uncommitted"
+    echo "         file(s)), so its revision label does not fully describe the binary."
 fi
 
 if (( rc == 0 )); then

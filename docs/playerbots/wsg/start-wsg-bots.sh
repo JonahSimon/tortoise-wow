@@ -29,7 +29,7 @@ done
 
 wsg_load_roster "$ROSTER"
 if ! wsg_check_db; then
-  echo "FATAL: DB unreachable via tw2-db (docker stack up? ${WSG_SERVER_ROOT}/.dbpass present?)" >&2
+  echo "FATAL: DB unreachable via tcm-db (docker stack up? ${WSG_SERVER_ROOT}/.dbpass present?)" >&2
   exit 1
 fi
 # Funnel preflight: WSG must be the only joinable BG for level-60 bots,
@@ -40,7 +40,7 @@ if [[ "$non_wsg_open" != "0" ]]; then
     echo "WARNING: ${non_wsg_open} non-WSG battlegrounds joinable (MinLvl <= 60) — bots will spread across queues and WSG may never fill."
   else
     echo "FATAL: ${non_wsg_open} non-WSG battlegrounds are joinable (MinLvl <= 60)." >&2
-    echo "Run:  bash $SCRIPT_DIR/wsg-only-mode.sh on   then:  docker restart tw2-mangosd" >&2
+    echo "Run:  bash $SCRIPT_DIR/wsg-only-mode.sh on   then:  docker restart tcm-mangosd" >&2
     echo "(or pass --no-funnel to ignore)" >&2
     exit 1
   fi
@@ -153,5 +153,5 @@ done
 echo "TIMEOUT waiting for WSG fill"
 echo "=== Final team status (name online map) ==="
 wsg_team_status
-echo "HINT: funnel is ON — bots cannot seed other BGs. If bots sit on maps != 489, confirm tw2-mangosd was restarted AFTER 'wsg-only-mode.sh on' (template loads at startup only; the DB preflight cannot see a missed restart). Testing fallback: .bgtest"
+echo "HINT: funnel is ON — bots cannot seed other BGs. If bots sit on maps != 489, confirm tcm-mangosd was restarted AFTER 'wsg-only-mode.sh on' (template loads at startup only; the DB preflight cannot see a missed restart). Testing fallback: .bgtest"
 exit 1
