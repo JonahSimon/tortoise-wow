@@ -3,7 +3,7 @@
 Everything below runs **inside WSL Ubuntu**. Docker Desktop's engine is shared,
 but relative bind-mount paths only resolve correctly from the WSL side.
 
-    cd /mnt/d/CodingProjects/tortoise-wow/tortoise-wow
+    cd /mnt/c/Coding/tortoise-wow/tortoise-wow
 
 ## First-time setup
 
