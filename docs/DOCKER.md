@@ -44,14 +44,25 @@ docker compose down          # NEVER -v — see below
 
 ## Rebuild after a C++ change
 
-Roughly 40 minutes. `scripts/rebuild.sh` builds to `tortoise-cm:candidate`, runs
-its acceptance checks, and moves the `:local` tag ONLY if every one passes — so a
-broken build cannot take the running server down with it.
+Roughly 9-10 minutes with the WSL2 VM at 16 CPU / 24GB
+(`C:\Users\mihov\.wslconfig`) and `BUILD_JOBS=10` (the `Dockerfile` default —
+see `Dockerfile:23-33`). Previously ~40 minutes at the VM's original 4 CPU /
+8GB allocation with `BUILD_JOBS=2`. `scripts/rebuild.sh` builds to
+`tortoise-cm:candidate`, runs its acceptance checks, and moves the `:local`
+tag ONLY if every one passes — so a broken build cannot take the running
+server down with it.
 
 ```bash
 ./scripts/rebuild.sh
-BUILD_JOBS=1 ./scripts/rebuild.sh    # if the Docker VM OOMs mid-compile
+BUILD_JOBS=4 ./scripts/rebuild.sh    # if the Docker VM OOMs mid-compile
 ```
+
+If the VM's own resource ceiling ever needs raising again — this is what
+actually controls build parallelism, not any per-container Docker setting —
+edit `C:\Users\mihov\.wslconfig`, then `wsl --shutdown` from PowerShell (not
+from inside WSL) to apply it, and reopen a WSL terminal to pick up the new
+limits. `docker info | grep -i -E "cpus|total memory"` confirms what Docker
+Desktop is actually running with.
 
 It does not restart anything. Apply the new image when you are ready:
 
