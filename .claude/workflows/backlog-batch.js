@@ -62,6 +62,11 @@ const VALIDATE_SCHEMA = {
 const PR_URL_PATTERN = /^https:\/\/github\.com\/[^\s/]+\/[^\s/]+\/pull\/\d+\/?$/
 const GH_REPO = 'ChrisMiho/tortoise-wow'
 const BASE_BRANCH_PATTERN = /^(cm-main|backlog\/[a-z0-9][a-z0-9_-]*)$/
+// Same pattern backlog-issue.js validates branchName against before ever
+// returning it -- but that check happens on a different Workflow run, so a
+// batch entry's branchName is untrusted here too by the time it reaches a
+// real "git push"/"gh pr create --head" below.
+const BRANCH_NAME_PATTERN = /^backlog\/[a-z0-9][a-z0-9_-]*$/
 
 const describe = (value) => {
   let text
@@ -192,12 +197,16 @@ const validated = await agent(
    dockerReady: false and liveness: a one-sentence explanation, and do NOT
    attempt docker compose at all -- skip straight to reporting that back.
 
-   If Docker is ready: bring the stack up with the ${imageTag} image (compose
-   project name is pinned to tortoise-wow-v2; tortoise-wow-v2_dbdata is an
-   external volume -- never use "docker compose down -v", that volume is the
-   entire world). This is a single-developer, no-live-players development
-   server -- you are not simulating a player, just confirming the server
-   comes up correctly.
+   If Docker is ready: bring the stack up with the ${imageTag} image by
+   running "TW_IMAGE=${imageTag} docker compose up -d" -- docker-compose.yml
+   resolves the server image via the TW_IMAGE env var (default
+   tortoise-v2:local), so a bare "docker compose up" silently reuses whatever
+   was built previously instead of this batch's image. (Compose project name
+   is pinned to tortoise-wow-v2; tortoise-wow-v2_dbdata is an external
+   volume -- never use "docker compose down -v", that volume is the entire
+   world.) This is a single-developer, no-live-players development server --
+   you are not simulating a player, just confirming the server comes up
+   correctly.
 
    Confirm the baseline liveness smoke test: the server starts, aiplayerbot.conf
    loads, bots spawn. Report that in liveness.
@@ -234,6 +243,21 @@ const perArtifactNote = (artifactPath) => {
 
 const results = []
 for (const item of included) {
+  if (!BRANCH_NAME_PATTERN.test(item.branchName || '')) {
+    // Never let an unvalidated branchName reach "git push"/"gh pr create
+    // --head" below -- exclude this artifact from the batch's git/gh
+    // commands the same way an Integrate-phase exclusion does, rather than
+    // trusting or silently defaulting it the way baseBranch does.
+    results.push({
+      artifactPath: item.artifactPath,
+      branchName: item.branchName,
+      contested: Boolean(item.contested),
+      excluded: true,
+      prUrl: null,
+      prReason: `branchName failed validation before push/PR, got: ${describe(item.branchName)}`,
+    })
+    continue
+  }
   const base = BASE_BRANCH_PATTERN.test(item.baseBranch || '') ? item.baseBranch : 'cm-main'
   const contestedSection = item.contested
     ? `
@@ -241,11 +265,15 @@ for (const item of included) {
       these and nothing else, one bullet per line:
 ${(item.contestedFindings || []).map((u) => `      - ${u}`).join('\n')}`
     : ''
+  // minorFindings arrives as an array of already-formatted "- <file>:
+  // <summary>" bullet strings (backlog-drain's SKILL.md persists them in
+  // that exact form and reassembles them verbatim) -- not {file, summary}
+  // objects, so use them as-is rather than re-formatting fields off them.
   const minorSection = item.minorFindings && item.minorFindings.length > 0
     ? `
    9. A section headed "Automated review — non-blocking findings", one bullet
       per line:
-${item.minorFindings.map((f) => `      - ${f.file}: ${f.summary}`).join('\n')}`
+${item.minorFindings.map((line) => `      ${line}`).join('\n')}`
     : ''
   const stackedSection = base !== 'cm-main'
     ? `
@@ -266,8 +294,14 @@ ${item.minorFindings.map((f) => `      - ${f.file}: ${f.summary}`).join('\n')}`
      2. Problem, quoted verbatim: "${item.problem}"
      3. Summary of the change made: ${item.summary}
      4. Acceptance criteria, quoted verbatim: "${item.acceptanceCriteria}"
-     5. This line, verbatim: "Build: ${imageTag} — run docker compose up
-        against this image to test. Compose project is tortoise-wow-v2."
+     5. This line, verbatim: "Build: ${imageTag} — run TW_IMAGE=${imageTag}
+        docker compose up against this image to test (docker-compose.yml
+        resolves the image via TW_IMAGE; a bare 'docker compose up' silently
+        reuses whatever was built previously). Compose project is
+        tortoise-wow-v2." Followed by this line, verbatim: "This image
+        contains every artifact in build ${buildId} merged together, not
+        just this PR's change alone — if something looks off while testing,
+        it may belong to a batch-mate rather than this PR."
      6. A section headed "In-game validation" containing this artifact's
         checklist item verbatim: "${item.inGameCheck}", followed by what was
         already attempted automatically in the shared batch validation pass:

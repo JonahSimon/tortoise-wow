@@ -79,6 +79,7 @@ raising it — smaller batches are cheaper to bisect.
      grinding the rest of the backlog into `failed`, and list what's still
      `implemented` (if the flush above left any — see its own failure
      reporting), `pending`, and untouched.
+   - Run step 9a (the worktree-isolation branch sweep).
    - Call `ScheduleWakeup({ stop: true })` and stop. Do not pick a new item.
 
    Fewer than two such commits (a fresh backlog) never trips this. An artifact
@@ -112,12 +113,20 @@ raising it — smaller batches are cheaper to bisect.
      stop: true })`, if any artifact is at `status: implemented`, run
      [Running a batch](#running-a-batch) once — even below the usual
      batch-size threshold — so nothing is left waiting on a batch that will
-     never trigger. Then report each blocked artifact by path and what it's
+     never trigger. That flush can itself move a dependency artifact from
+     `implemented` to `done` (step 4 of "Running a batch"), which is exactly
+     the condition this step checks — so after the flush, re-run this
+     eligibility check against the current `pending` files before deciding to
+     stop: if any of them now has a `done` dependency, it's newly ready —
+     pick it and continue the tick from step 5a onward instead of stopping.
+     Only if every remaining `pending` file is still blocked after the flush
+     do you actually stop: report each blocked artifact by path and what it's
      waiting on, along with any artifacts still `implemented` after that
-     flush, call `ScheduleWakeup({ stop: true })`, and stop. Do not pick
-     anything. (A dependency cycle surfaces here too, indistinguishable
-     from an ordinary not-yet-drained dependency — both are reported the same
-     way and require a human to look.)
+     flush, run step 9a (the worktree-isolation branch sweep), call
+     `ScheduleWakeup({ stop: true })`, and stop. Do not pick anything. (A
+     dependency cycle surfaces here too, indistinguishable from an ordinary
+     not-yet-drained dependency — both are reported the same way and require
+     a human to look.)
 5a. Resolve the base branch for the picked artifact:
    - No `depends-on:` — `baseBranch: "cm-main"`, no `dependsOnPrUrl`.
    - `depends-on:` set (and therefore, per step 5, that dependency's
@@ -168,10 +177,17 @@ raising it — smaller batches are cheaper to bisect.
      [Running a batch](#running-a-batch) below — nothing else persists this
      result between the implement tick and the later batch tick:
      - `**Base:** <resolved base branch (step 5a)>`
+     - `**Branch:** <result.branchName>` — this is the authoritative branch
+       name the batch pass uses; step 9's filename-derived
+       `backlog/<slug>` remains only a fallback for locating the worktree
+       during that step's own cleanup, not a source of truth for the batch.
      - `**Summary:** <result.summary>`
      - `**In-game check:** <result.inGameCheck>`
-     - `**Minor findings:** <one bullet per result.minorFindings entry>` —
-       omit this line entirely if `minorFindings` is empty.
+     - `**Minor findings:**` followed by one bullet per
+       `result.minorFindings` entry, each formatted exactly `- <finding.file>:
+       <finding.summary>` — this exact format is read back verbatim by
+       [Running a batch](#running-a-batch) step 1, so don't paraphrase it.
+       Omit the whole line/section entirely if `minorFindings` is empty.
      - If `contested` is present: `**Contested:** <one bullet per
        contestedFindings entry>`
      Do not open a PR here and do not mark it `done` — that, along with
@@ -283,11 +299,14 @@ raising it — smaller batches are cheaper to bisect.
     incident is safe — it landed on `cm-main` via a different path — but the
     branch itself was never verified reachable before this sweep existed.)
 
-    This sweep also runs as the last action before either terminal-tick exit
-    (`docs/backlog/.stop` present, or no `pending` artifacts remain) and
-    before the circuit-breaker stop — not only during an ordinary tick — so a
-    drain session that halts early still leaves the repo swept rather than
-    accumulating scaffold branches across every future session.
+    This sweep also runs as the last action before every terminal-tick stop
+    path that flushes a batch (steps 1, 3, 4, and 5 — the `.stop`-sentinel
+    exit, the circuit-breaker stop, the drained-backlog stop, and the
+    dependency-deadlock stop) — not only during an ordinary tick — so a drain
+    session that halts early still leaves the repo swept rather than
+    accumulating scaffold branches across every future session. (The
+    systemic-failure stop, step 8, deliberately skips both the flush and this
+    sweep — see its own reasoning.)
 10. Unless step 8 took the systemic path, stage and commit the artifact's
     status change with a subject in exactly this form — step 3's circuit
     breaker reads it back:
@@ -315,7 +334,7 @@ raising it — smaller batches are cheaper to bisect.
     - `reason`: one line, e.g. `"continuing backlog drain, N pending remaining"`
     - `noop: false` (a real tick of work happened)
 
-    Running a batch ends by scheduling the next tick itself (see its step 7
+    Running a batch ends by scheduling the next tick itself (see its step 8
     below), so don't also schedule one here after it returns.
 
 ## Running a batch
@@ -324,14 +343,18 @@ Triggered from step 11 above, or from one of the terminal-tick flushes (steps
 1, 3, 4, 5 — see [Stopping the loop](#stopping-the-loop)). Gather every
 artifact at `status: implemented`:
 
-1. For each, read back the `**Base:**`, `**Summary:**`, `**In-game check:**`,
-   and (if present) `**Minor findings:**`/`**Contested:**` lines appended when
-   it moved to `implemented` (step 8 of "One tick" above) — these carry
-   `baseBranch`/`summary`/`inGameCheck`/`minorFindings`/`contested`/
-   `contestedFindings` forward, since nothing else persists that state
-   between the implement tick and the batch pass. `problem` and
-   `acceptanceCriteria` don't need their own lines — they're already in the
-   artifact's own **Problem:**/**Acceptance criteria:** sections.
+1. For each, read back the `**Base:**`, `**Branch:**`, `**Summary:**`,
+   `**In-game check:**`, and (if present) `**Minor findings:**`/
+   `**Contested:**` lines appended when it moved to `implemented` (step 8 of
+   "One tick" above) — these carry `baseBranch`/`branchName`/`summary`/
+   `inGameCheck`/`minorFindings`/`contested`/`contestedFindings` forward,
+   since nothing else persists that state between the implement tick and the
+   batch pass. `minorFindings` reassembles as an array of the bullet strings
+   themselves (each already formatted `- <file>: <summary>`, per step 8's
+   exact format) — not `{file, summary}` objects — so pass them to
+   `backlog-batch` verbatim. `problem` and `acceptanceCriteria` don't need
+   their own lines — they're already in the artifact's own
+   **Problem:**/**Acceptance criteria:** sections.
 2. Compute a `buildId` — a short, sortable, human-readable string such as
    `<date>-<sequence>` (e.g. `20260813-1`). Sequence within a day so two
    batches on the same day don't collide, mirroring Task 2's migration-filename
@@ -342,12 +365,13 @@ artifact at `status: implemented`:
    where each batch entry is
    `{ artifactPath, branchName, baseBranch, dependsOnPrUrl, summary, problem, acceptanceCriteria, inGameCheck, minorFindings, contested, contestedFindings }`
    — reassembled from each artifact's file: the lines read back in step 1
-   supply `baseBranch`/`summary`/`inGameCheck`/`minorFindings`/`contested`/
-   `contestedFindings`, and the artifact's own **Problem:**/**Acceptance
-   criteria:** sections supply the rest. `dependsOnPrUrl` isn't persisted
-   separately — re-derive it the same way step 5a (Task 3) did, from the
-   `depends-on:` frontmatter and the dependency artifact's `**Result:**` line,
-   only when `baseBranch` isn't `cm-main`.
+   supply `baseBranch`/`branchName`/`summary`/`inGameCheck`/`minorFindings`/
+   `contested`/`contestedFindings`, and the artifact's own
+   **Problem:**/**Acceptance criteria:** sections supply the rest.
+   `dependsOnPrUrl` isn't persisted separately — re-derive it the same way
+   step 5a (Task 3) did, from the `depends-on:` frontmatter and the
+   dependency artifact's `**Result:**` line, only when `baseBranch` isn't
+   `cm-main`.
 4. On `{ success: true, results, buildId, imageTag }`: for each entry in
    `results` with a `prUrl`, edit that artifact's frontmatter to `status: done`
    (or `status: contested` if that entry's `contested` was true) and append
@@ -362,15 +386,56 @@ artifact at `status: implemented`:
    implemented` (do not touch their status), and report the failure loudly
    with the `reason` and the full list of artifacts that were in the
    attempted batch, so a human can decide whether to retry, exclude a
-   suspected artifact by hand, or investigate the build break directly.
+   suspected artifact by hand, or investigate the build break directly. This
+   is a stopping condition, not a continue-the-loop one — mirroring step 8's
+   systemic-failure handling in "One tick": after step 6's commit and step
+   7's cleanup below run as normal, call `ScheduleWakeup({ stop: true })`
+   here rather than proceeding to step 8's continue. Without this, the next
+   tick would implement one more artifact, hit the batch-size threshold
+   again, and re-trigger this same failing batch — burning a full build
+   cycle every retry until a human intervenes. Step 8 below does not apply
+   when this path is taken.
 6. Commit whatever status/body changes steps 4-5 produced, subject
    `backlog: batch ${buildId}`.
-7. Continue the loop as step 11 would have (schedule the next tick) —
-   running a batch does not itself end the drain. **Exception:** if this
-   batch was triggered by one of the terminal-tick flushes instead of step
-   11, skip this step — that terminal tick's own `ScheduleWakeup({ stop:
-   true })` still runs right after, per its own instructions, and calling
-   `ScheduleWakeup` twice in one tick would be a bug.
+7. Clean up the Integrate-phase worktree and its `integration/${buildId}`
+   scaffold branch, whether the batch succeeded (step 4) or failed (step 5) —
+   the Integrate phase ran with `isolation: 'worktree'` and left both behind,
+   and nothing else in this workflow removes them. Do this only once the
+   branch's content is confirmed to have landed somewhere durable, using the
+   same reachability principle step 9a (of "One tick") uses for its own
+   scaffold-branch sweep — deleting an unreachable commit here would lose the
+   only copy of it:
+
+   ```
+   git merge-base --is-ancestor integration/<buildId> origin/cm-main
+   ```
+
+   or, for each artifact actually included in the batch whose branch was
+   successfully pushed (i.e. it has a real `prUrl` in `results`):
+
+   ```
+   git merge-base --is-ancestor integration/<buildId> backlog/<slug>
+   ```
+
+   If either check exits `0`, the integration branch's content is safe
+   elsewhere — remove the worktree (`git worktree remove <path>`, run from
+   the main checkout; `--force` is acceptable if leftover untracked build
+   output blocks it, since nothing is being discarded) and delete the branch
+   (`git branch -D integration/<buildId>`). If neither check exits `0` (e.g.
+   step 5's batch-wide failure happened before anything was pushed), **do
+   not delete either** — leave the worktree and branch in place and report
+   the worktree's path and branch name instead, matching step 9's "not on
+   origin" pattern in "One tick", so a human can look before anything is
+   lost.
+8. Continue the loop as step 11 would have (schedule the next tick) —
+   running a batch does not itself end the drain. **Exceptions** (calling
+   `ScheduleWakeup` twice in one tick would be a bug, so skip this step if
+   either applies):
+   - Step 5's batch-wide failure path was just taken — its own text already
+     called `ScheduleWakeup({ stop: true })` above.
+   - This batch was triggered by one of the terminal-tick flushes instead of
+     step 11 — that terminal tick's own `ScheduleWakeup({ stop: true })`
+     still runs right after, per its own instructions.
 
 ## Systemic vs. per-artifact failures
 
@@ -408,15 +473,20 @@ in flight finish (an implement+review tick just commits locally now; it no
 longer opens a PR), then halts before starting another. This works even if no
 one is watching the conversation when the sentinel is created.
 
-The loop also stops on its own for four reasons: the backlog is drained (step
+The loop also stops on its own for five reasons: the backlog is drained (step
 4), two consecutive artifacts failed (step 3), every remaining `pending`
-artifact is blocked on an unready dependency (step 5), or a failure looked
-systemic (step 8). All four report before stopping. The first three of those,
-plus the `.stop`-sentinel stop above, also flush a final partial batch first
-if one is waiting (any artifact at `status: implemented`) — see each step's
-own instructions — so a stop never leaves artifacts stranded on a batch that
-would otherwise never trigger. The systemic stop (step 8) deliberately does
-not flush: see its own reasoning for why.
+artifact is blocked on an unready dependency (step 5), a failure looked
+systemic (step 8), or a batch pass itself failed (batch-wide, not
+per-artifact — see "Running a batch" step 5). All five report before
+stopping. The first three "One tick" reasons, plus the `.stop`-sentinel stop
+above, also flush a final partial batch first if one is waiting (any artifact
+at `status: implemented`) — see each step's own instructions — so a stop
+never leaves artifacts stranded on a batch that would otherwise never
+trigger. The systemic stop (step 8) deliberately does not flush: see its own
+reasoning for why. The batch-wide-failure stop doesn't flush either — it *is*
+the flush (or the batch pass a flush would have run), and it already stopped
+because that very batch failed, so there's nothing further to flush before
+stopping.
 
 ## Before trusting an unattended run
 
@@ -437,7 +507,7 @@ before:
    the result was success-shaped with a `branchName`, not a systemic-shaped
    result (see [Systemic vs. per-artifact failures](#systemic-vs-per-artifact-failures));
    the artifact reached `status: implemented` with the `**Base:**`/
-   `**Summary:**`/`**In-game check:**` lines appended; the Implement worktree
+   `**Branch:**`/`**Summary:**`/`**In-game check:**` lines appended; the Implement worktree
    is gone (`git worktree list`) but the `backlog/<slug>` branch still exists
    locally (`git branch --list`) and is **not yet** on origin
    (`git ls-remote --heads origin backlog/<slug>` returns nothing).

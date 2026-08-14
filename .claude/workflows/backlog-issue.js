@@ -1,6 +1,6 @@
 export const meta = {
   name: 'backlog-issue',
-  description: 'Implement one scoped backlog issue and open a PR for it',
+  description: 'Implement and review one scoped backlog issue on a local branch; a later backlog-batch pass builds, validates, and opens the PR.',
   phases: [
     { title: 'Implement' },
     { title: 'Review' },
@@ -264,7 +264,11 @@ const allFindings = returnedReviews.flatMap((r) => r.findings || [])
 const blocking = allFindings.filter((f) => f.severity === 'blocking')
 const minor = allFindings.filter((f) => f.severity === 'minor')
 
-const blockingInfeasible = blocking.filter((f) => f.blocked === true)
+// Checked across ALL findings, not just severity: blocking -- a lens can set
+// blocked: true on a minor-severity finding too, and that signal must still
+// stop the artifact from reaching status: implemented with an unsatisfiable
+// acceptance criterion silently shipped.
+const blockingInfeasible = allFindings.filter((f) => f.blocked === true)
 if (blockingInfeasible.length > 0) {
   return {
     success: false,
