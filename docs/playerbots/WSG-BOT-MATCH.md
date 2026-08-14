@@ -31,7 +31,7 @@ city and see nothing. **Confirm the match is live before you teleport** — §5.
 | Thing | Where |
 |---|---|
 | Compose project | `~/tortoise-wow-server-V2` (WSL Ubuntu, user `deck`) |
-| Containers | `tw2-db`, `tw2-realmd`, `tw2-mangosd` |
+| Containers | `tcm-db`, `tcm-realmd`, `tcm-mangosd` |
 | Config (bind-mounted `./etc` → `/opt/turtle/etc`) | `~/tortoise-wow-server-V2/etc/{aiplayerbot,mangosd}.conf` |
 | Logs | `~/tortoise-wow-server-V2/logs/` — `bg.log` is the one you want |
 | C++ source | `~/tortoise-wow-server-V2/src` (**WSL-side**; `D:\TurtleWow\extracted\…` is a slim copy without full source) |
@@ -64,7 +64,7 @@ EOF
 
 | Function | Does |
 |---|---|
-| `wsg_mysql "<sql>"` | Query via `docker exec tw2-db`; handles `.dbpass` and strips CR |
+| `wsg_mysql "<sql>"` | Query via `docker exec tcm-db`; handles `.dbpass` and strips CR |
 | `wsg_console "<cmds>" [wait_s]` | Send commands to the mangosd console (see §7) |
 | `wsg_load_roster <file>` | Load `scripts/wsg-team-roster.txt` into `WSG_NAMES`/`WSG_CLASS`/… |
 | `wsg_team_status` | Prints `name online map` per roster bot; missing bots get map `-1` |
@@ -109,7 +109,7 @@ Set the pool size **before** the restart — excess bots only leave via timed lo
 which this profile disables.
 
 ```bash
-docker restart tw2-mangosd
+docker restart tcm-mangosd
 ```
 
 Watch it come up (note the **`Z`** — a naive timestamp is read as local, lands in the
@@ -118,8 +118,8 @@ future, and returns zero lines):
 ```bash
 MSYS_NO_PATHCONV=1 wsl -d Ubuntu -u deck -- bash <<'EOF'
 TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-docker restart tw2-mangosd
-until docker logs tw2-mangosd --since "$TS" 2>&1 | grep -qa ai_playerbot_random_bots; do sleep 5; done
+docker restart tcm-mangosd
+until docker logs tcm-mangosd --since "$TS" 2>&1 | grep -qa ai_playerbot_random_bots; do sleep 5; done
 echo "world live"
 EOF
 ```
@@ -258,7 +258,7 @@ does not apply.
 
 ## 6. Monitoring — `logs/bg.log`
 
-`docker logs tw2-mangosd` carries **no** battleground lifecycle lines at the live log
+`docker logs tcm-mangosd` carries **no** battleground lifecycle lines at the live log
 level, so it looks like nothing is happening even when the queue is filling. Use the
 dedicated log instead:
 
@@ -297,7 +297,7 @@ EOF
 
 - **No leading dot.** `server info`, `rndbot add Wsgaone`. (In-game chat keeps the dot.)
 - **EOF on the attach stream shuts the world down.** This has happened. Compose sets
-  `restart: "no"`, so recovery is `docker start tw2-mangosd` (~1 min to load).
+  `restart: "no"`, so recovery is `docker start tcm-mangosd` (~1 min to load).
   Always detach with the detach keys; never Ctrl-C the stream.
 - Console-aware commands print normally (`server info`), but **`rndbot` replies go to a
   null player session and vanish.** Verify everything in the DB, not from console output.

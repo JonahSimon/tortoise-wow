@@ -264,7 +264,7 @@ proposed passing `200.0f`. That was wrong twice over:
 
 Making this branch cheap requires an **entry-indexed lookup** into the GO spawn data (or caching
 the per-map/per-entry result), not a distance filter. That is tracked separately as backlog
-artifact `010-index-go-spawn-lookup-by-entry.md`; the fix below deliberately leaves the scan
+artifact `012-index-go-spawn-lookup-by-entry.md`; the fix below deliberately leaves the scan
 unbounded and fixes only the guid bug and the missing null check.
 
 **Fix — resolve through the live map, and leave the search unbounded.**
@@ -311,7 +311,7 @@ std::set<GenericTransport*> WorldPosition::getTransports(uint32 entry)
 `src/game/ObjectGuid.h:129`, and `GameObjectData::id` is the GO entry.
 
 Note that this alone does not fix elevators or the tram — see D3. It makes the lookup correct; the
-per-tick full-map scan (b) is still there, and needs the entry index tracked in artifact 010.
+per-tick full-map scan (b) is still there, and needs the entry index tracked in artifact 012.
 
 ### D3 — this core has no server-side transport type for elevators and trams
 

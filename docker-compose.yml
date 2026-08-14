@@ -7,7 +7,7 @@
 
 # PINNED. Compose otherwise derives the project name from the directory basename,
 # which would point the stack at a new, empty database volume.
-name: tortoise-wow-v2
+name: tortoise-cm
 
 # Docker's json-file driver defaults to NO size limit, and these logs are easy to
 # forget because they do not live in logs/ — they are inside the Docker VM, where
@@ -34,7 +34,7 @@ services:
     # joins between the two raise "Illegal mix of collations". Matching the dump's
     # own version avoids the problem rather than repairing it afterwards.
     image: mariadb:10.6
-    container_name: tw2-db
+    container_name: tcm-db
     restart: "no"
     # SIGTERM to SIGKILL default is 10s; MariaDB needs longer to flush a
     # multi-GB InnoDB buffer pool to the bind-mounted volume. A SIGKILL here
@@ -62,11 +62,11 @@ services:
       timeout: 5s
       retries: 60
     logging: *default-logging
-    networks: [tw2-net]
+    networks: [tcm-net]
 
   realmd:
-    image: "${TW_IMAGE:-tortoise-v2:local}"
-    container_name: tw2-realmd
+    image: "${TW_IMAGE:-tortoise-cm:local}"
+    container_name: tcm-realmd
     # Docker is the supervisor for this process; see mangosd below for why
     # "no" left the world offline while realmd kept answering logins.
     restart: unless-stopped
@@ -80,11 +80,11 @@ services:
     working_dir: /opt/turtle/bin
     command: ["./realmd", "-c", "/opt/turtle/etc/realmd.conf"]
     logging: *default-logging
-    networks: [tw2-net]
+    networks: [tcm-net]
 
   mangosd:
-    image: "${TW_IMAGE:-tortoise-v2:local}"
-    container_name: tw2-mangosd
+    image: "${TW_IMAGE:-tortoise-cm:local}"
+    container_name: tcm-mangosd
     # mangosd schedules its OWN restart (AutoHonorRestart=1 in mangosd.conf) and
     # exits 0 expecting a supervisor to start it again. With `restart: "no"` that
     # exit left the world offline indefinitely while realmd kept answering logins,
@@ -115,7 +115,7 @@ services:
     stdin_open: true
     tty: true
     logging: *default-logging
-    networks: [tw2-net]
+    networks: [tcm-net]
 
 volumes:
   # EXTERNAL on purpose. This volume is the entire world — every character and all
@@ -126,4 +126,4 @@ volumes:
     name: tortoise-wow-v2_dbdata
 
 networks:
-  tw2-net:
+  tcm-net:

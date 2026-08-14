@@ -3,7 +3,7 @@
 Everything below runs **inside WSL Ubuntu**. Docker Desktop's engine is shared,
 but relative bind-mount paths only resolve correctly from the WSL side.
 
-    cd /mnt/d/CodingProjects/tortoise-wow/tortoise-wow
+    cd /mnt/c/Coding/tortoise-wow/tortoise-wow
 
 ## First-time setup
 
@@ -12,18 +12,17 @@ cp .env.example .env
 # paste the password from /home/deck/tortoise-wow-server-V2/.dbpass into DB_PASS
 ```
 
-`.env` holds the database password in plaintext. It is excluded from commits via
-`.git/info/exclude` in this checkout — but that is **local only**. The matching
-`.gitignore` line exists in the working tree and is **not yet committed**, so a
-fresh clone of this repo does not inherit the protection. Commit it when the
-concurrent `fork-migration` work in `.gitignore` has landed.
+`.env` holds the database password in plaintext. It is excluded two ways: by
+`.gitignore:27`, which is committed and so inherited by a fresh clone, and by
+`.git/info/exclude` in this checkout, which is local only. Both are deliberate —
+the local rule predates the committed one and is harmless to keep.
 
 `.env` also points `TW_DATA`, `TW_ETC` and `TW_LOGS` at the existing stack
 directory. That is deliberate: the extracted client data is several gigabytes and
 the configs are tuned, so both are reused rather than duplicated.
 
 `DB_PASS` reaches the database container as an environment variable, so anyone
-who can run `docker inspect tw2-db` can read the root password in plaintext.
+who can run `docker inspect tcm-db` can read the root password in plaintext.
 Treat docker access as equivalent to database access.
 
 The verify command below deliberately passes the secret via `MYSQL_PWD` rather
@@ -44,14 +43,25 @@ docker compose down          # NEVER -v — see below
 
 ## Rebuild after a C++ change
 
-Roughly 40 minutes. `scripts/rebuild.sh` builds to `tortoise-v2:candidate`, runs
-its acceptance checks, and moves the `:local` tag ONLY if every one passes — so a
-broken build cannot take the running server down with it.
+Roughly 9-10 minutes with the WSL2 VM at 16 CPU / 24GB
+(`C:\Users\mihov\.wslconfig`) and `BUILD_JOBS=10` (the `Dockerfile` default —
+see `Dockerfile:23-33`). Previously ~40 minutes at the VM's original 4 CPU /
+8GB allocation with `BUILD_JOBS=2`. `scripts/rebuild.sh` builds to
+`tortoise-cm:candidate`, runs its acceptance checks, and moves the `:local`
+tag ONLY if every one passes — so a broken build cannot take the running
+server down with it.
 
 ```bash
 ./scripts/rebuild.sh
-BUILD_JOBS=1 ./scripts/rebuild.sh    # if the Docker VM OOMs mid-compile
+BUILD_JOBS=4 ./scripts/rebuild.sh    # if the Docker VM OOMs mid-compile
 ```
+
+If the VM's own resource ceiling ever needs raising again — this is what
+actually controls build parallelism, not any per-container Docker setting —
+edit `C:\Users\mihov\.wslconfig`, then `wsl --shutdown` from PowerShell (not
+from inside WSL) to apply it, and reopen a WSL terminal to pick up the new
+limits. `docker info | grep -i -E "cpus|total memory"` confirms what Docker
+Desktop is actually running with.
 
 It does not restart anything. Apply the new image when you are ready:
 
@@ -69,7 +79,7 @@ A bound port only proves `docker-proxy` answered. Check the population:
 
 ```bash
 P=$(tr -d '\r\n' < /home/deck/tortoise-wow-server-V2/.dbpass)
-docker exec -i -e MYSQL_PWD="$P" tw2-db mysql -uroot -N -e \
+docker exec -i -e MYSQL_PWD="$P" tcm-db mysql -uroot -N -e \
   "SELECT CONCAT(name,'  port=',port,'  realmflags=',realmflags) FROM tw_logon.realmlist;
    SELECT CONCAT('characters online: ',COUNT(*)) FROM tw_char.characters WHERE online=1;" \
   2>/dev/null
@@ -84,17 +94,17 @@ docker exec -i -e MYSQL_PWD="$P" tw2-db mysql -uroot -N -e \
 Every build is tagged with its commit, so the previous server is still on disk:
 
 ```bash
-docker images --filter reference=tortoise-v2
+docker images --filter reference=tortoise-cm
 
 # Point TW_IMAGE at the anchor explicitly. Retagging :local is NOT enough — if
-# .env has TW_IMAGE=tortoise-v2:candidate (which .env.example invites for testing
+# .env has TW_IMAGE=tortoise-cm:candidate (which .env.example invites for testing
 # a fresh build), compose resolves :candidate, sees no change, prints "Running",
 # and relaunches the very image you are rolling back from.
-sed -i 's|^TW_IMAGE=.*|TW_IMAGE=tortoise-v2:c06b2fb|' .env
+sed -i 's|^TW_IMAGE=.*|TW_IMAGE=tortoise-cm:c06b2fb|' .env
 docker compose up -d
 ```
 
-Set `TW_IMAGE` back to `tortoise-v2:local` once you have rebuilt a good image.
+Set `TW_IMAGE` back to `tortoise-cm:local` once you have rebuilt a good image.
 
 ## Things that will cost you an afternoon
 
@@ -102,7 +112,7 @@ Set `TW_IMAGE` back to `tortoise-v2:local` once you have rebuilt a good image.
 |---|---|
 | **`docker compose down -v`** | Destroys `tortoise-wow-v2_dbdata` — every character and all progression. The volume is declared `external` so compose cannot recreate it silently, but `-v` still removes it. Never run it. |
 | Line endings | This checkout must stay LF (`git config core.autocrlf false`). A CRLF tree compiles, but produces different bytes than the tree the proven image came from. |
-| `BUILD_PLAYERBOTS` | Defaults `OFF`. A build without it yields a bot-free server with no warning. Check: `docker run --rm tortoise-v2:local ls /opt/turtle/etc \| grep aiplayerbot`. |
+| `BUILD_PLAYERBOTS` | Defaults `OFF`. A build without it yields a bot-free server with no warning. Check: `docker run --rm tortoise-cm:local ls /opt/turtle/etc \| grep aiplayerbot`. |
 | **A rebuild that produces no binary** | `scripts/rebuild.sh` checks that `mangosd`/`realmd` exist before checking that they link — `ldd` on a missing file writes to stderr, so a naive `ldd \| grep 'not found'` reports a missing binary as healthy. Do not "simplify" the `test -x` check or the `2>&1` out of that loop. |
 | `CMAKE_INSTALL_PREFIX` | Compiled in. It must stay `/opt/turtle` or the server logs one line about `aiplayerbot.conf` and runs with no bots. |
 | Ports 3724 / 8095 | Shared with the older V1 stack. They cannot run together. |
@@ -174,3 +184,42 @@ This checkout is **not** the only tree of this repo on the machine. A second,
 diverged checkout lives at `/home/deck/tortoise-wow-server-V2/src` and shares
 ancestor `c06b2fb`. Before building, confirm which tree you mean to ship —
 building the wrong one silently produces a server without the change you made.
+
+### Names are this repo's; the Docker daemon is not
+
+`docker images` is host-global. Every checkout on this machine publishes into
+one image namespace, so a name is a claim, not a guarantee. On 2026-08-14 a
+different tree built `tortoise-v2:baseline` and `tortoise-v2:elevator-fix` on
+this host, carrying no provenance labels — which is why this repo moved off
+`tortoise-v2` entirely:
+
+| What | Was | Now |
+|---|---|---|
+| Image | `tortoise-v2` | `tortoise-cm` |
+| Compose project | `tortoise-wow-v2` | `tortoise-cm` |
+| Containers | `tw2-db`, `tw2-realmd`, `tw2-mangosd` | `tcm-db`, `tcm-realmd`, `tcm-mangosd` |
+| DB volume | `tortoise-wow-v2_dbdata` | **unchanged — this is the world** |
+
+The volume keeps its old name deliberately. It is declared `external: true` with
+an explicit `name:` (`docker-compose.yml:124-126`), so it is pinned independently
+of the project name and the rename cannot strand it. Never rename it, and never
+`docker compose down -v`.
+
+Renaming reduces collisions; it does not detect them. The check that does is
+`scripts/verify-running-commit.sh`, which resolves the running image's
+`org.opencontainers.image.revision` label **inside this repo**:
+
+```bash
+./scripts/verify-running-commit.sh
+```
+
+| Verdict | Exit | Meaning |
+|---|---|---|
+| `MATCH` | 0 | Running image was built from HEAD. |
+| `DRIFT` | 1 | Built from another commit *of this repo*. Rebuild or roll back. |
+| `FOREIGN` | 1 | Stamped with a revision this repo does not contain — built by a different checkout. Nothing about it describes your code. |
+| `UNKNOWN` | 2 | Nothing running, or the image predates label stamping. |
+
+`FOREIGN` is the one worth internalising: a foreign image can pass a liveness
+smoke test perfectly while containing none of your changes. Run this before
+trusting any measurement taken against a running stack.

@@ -21,7 +21,7 @@ never breaks early. This runs on every `UseTransport` call, for every bot
 waiting at a transport, every tick — a meaningful CPU sink independent of bug
 (a). Note this is *not* caused by the radius-`0` argument, and cannot be fixed
 by passing a radius: the radius only prunes the result vector, not the walk.
-Re-scoped to artifact `010-index-go-spawn-lookup-by-entry.md`.
+Re-scoped to artifact `012-index-go-spawn-lookup-by-entry.md`.
 
 **Suspected cause / area:**
 `src/modules/PlayerBots/playerbot/WorldPosition.cpp:564` (`getTransports`),
@@ -42,7 +42,7 @@ Re-scoped to artifact `010-index-go-spawn-lookup-by-entry.md`.
   themselves, and the six Deeprun Tram cars sit in two clusters ~2460y apart
   on map 369, so a 200y filter hides three of them from either platform. The
   scan stays unbounded here; the cost is re-scoped to artifact
-  `010-index-go-spawn-lookup-by-entry.md`.
+  `012-index-go-spawn-lookup-by-entry.md`.
 - `getMap(getFirstInstanceId())` is null-checked before use (the fix in the
   investigation doc adds this guard).
 
@@ -51,6 +51,6 @@ fix alone does **not** make elevators or the Deeprun Tram boardable — that
 also requires a server-side transport type for GO type 11 (see the separate
 `LocalTransport` backlog artifact) — but it makes the lookup correct
 regardless. The per-tick full-map scan is left in place and re-scoped to
-artifact 010; see that artifact for why a radius bound cannot fix it.
+artifact 012; see that artifact for why a radius bound cannot fix it.
 
 **Result:** PR opened at https://github.com/ChrisMiho/tortoise-wow/pull/12

@@ -129,7 +129,10 @@ on a `worktree-wf_*` branch and nowhere else.
 
 - **`docs/backlog/010-index-go-spawn-lookup-by-entry.md` is `pending`** — created
   by #12's implementer when it found the full-map GO scan could not be fixed by a
-  radius bound. It is the next drain candidate.
+  radius bound. It is the next drain candidate. (Renumbered to
+  `012-index-go-spawn-lookup-by-entry.md` on 2026-08-14 so the memory
+  investigation in `011` drains first; it was never picked up under either
+  number.)
 - **`origin/backlog/generate-and-ship-static-portal-links` is kept
   deliberately**, against the usual prune-by-default habit. `bb5aa26` and
   `76016c6` implement 007's *code* side — a `gen portal` command that mutates the

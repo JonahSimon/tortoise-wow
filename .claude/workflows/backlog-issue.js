@@ -1,14 +1,18 @@
 export const meta = {
   name: 'backlog-issue',
-  description: 'Implement one scoped backlog issue and open a PR for it',
+  description: 'Implement and review one scoped backlog issue on a local branch; a later backlog-batch pass builds, validates, and opens the PR.',
   phases: [
     { title: 'Implement' },
     { title: 'Review' },
-    { title: 'Verify' },
-    { title: 'PR' },
   ],
 }
 
+// Review lenses run at medium effort by default (see
+// docs/superpowers/plans/2026-08-12-backlog-issue-model-tuning.md) — but keep
+// the session's full tier for artifacts with risk: high, where a mid-tier
+// lens is more likely to miss a subtle finding. There is no automated
+// escalation yet; a human editing this file for a high-risk drain run should
+// drop the effort override for that run.
 const REVIEW_SCHEMA = {
   type: 'object',
   properties: {
@@ -20,6 +24,7 @@ const REVIEW_SCHEMA = {
           summary: { type: 'string' },
           file: { type: 'string' },
           severity: { type: 'string', enum: ['blocking', 'minor'] },
+          blocked: { type: 'boolean' },
         },
         required: ['summary', 'file', 'severity'],
       },
@@ -35,8 +40,11 @@ const IMPLEMENT_SCHEMA = {
     summary: { type: 'string' },
     problem: { type: 'string' },
     acceptanceCriteria: { type: 'string' },
+    blocked: { type: 'boolean' },
+    blockedReason: { type: 'string' },
+    inGameCheck: { type: 'string' },
   },
-  required: ['branchName', 'summary', 'problem', 'acceptanceCriteria'],
+  required: ['branchName', 'summary', 'problem', 'acceptanceCriteria', 'inGameCheck'],
 }
 
 const FIX_SCHEMA = {
@@ -48,22 +56,14 @@ const FIX_SCHEMA = {
   required: ['fixed'],
 }
 
-const PR_SCHEMA = {
-  type: 'object',
-  properties: {
-    prUrl: { type: 'string' },
-  },
-  required: ['prUrl'],
-}
-
-// The Implement phase's branch name flows straight into a real "git push", so it
-// is validated rather than trusted. backlog-scope slugifies titles to lowercase
+// The Implement phase's branch name flows straight into a real "git push" in a
+// later batch step, so it is validated rather than trusted here. backlog-scope
+// slugifies titles to lowercase
 // words joined by hyphens, and the branch slug is that filename minus its NNN-
 // prefix and .md suffix, so a well-formed branch is always backlog/<slug>.
 // Underscores are tolerated; dots are not, because they would allow ".." and a
 // trailing ".lock" -- both of which git rejects in a ref anyway.
 const BRANCH_NAME_PATTERN = /^backlog\/[a-z0-9][a-z0-9_-]*$/
-const PR_URL_PATTERN = /^https:\/\/github\.com\/[^\s/]+\/[^\s/]+\/pull\/\d+\/?$/
 
 // Turn whatever an agent actually returned into something short and printable,
 // so a rejected result is debuggable from the drain skill's failure notes.
@@ -106,32 +106,31 @@ const artifactLabel = backlogDirIndex >= 0
   ? normalizedArtifactPath.slice(backlogDirIndex)
   : normalizedArtifactPath.slice(normalizedArtifactPath.lastIndexOf('/') + 1)
 
-// dryRun must be explicitly true or false. Any other value (missing,
-// malformed, a truthy-but-non-boolean value) fails safe toward dryRun: true
-// rather than silently falling through to a real push+PR -- a plain
-// Boolean(args.dryRun) coercion previously turned a missing/undefined
-// dryRun into `false` (the dangerous direction) and did exactly that.
-let dryRun
-if (normalizedArgs.dryRun === false) {
-  dryRun = false
-} else {
-  if (normalizedArgs.dryRun !== true) {
-    log(`dryRun was not explicitly true or false (got ${JSON.stringify(normalizedArgs.dryRun)}) -- defaulting to dryRun: true (safe) rather than risking a real push+PR`)
-  }
-  dryRun = true
-}
-
 // This fork's trunk is cm-main, not playerbots-integration-gh -- the latter is a
 // pristine fast-forward-only mirror of upstream that is never committed to
-// directly (see docs/BRANCHING.md). Every branch/diff/PR-base below must point
-// at cm-main.
-const BASE_BRANCH = 'cm-main'
-
-// gh commands without an explicit --repo resolve against whichever remote GitHub
-// considers the fork's parent (upstream), not this fork -- also documented in
-// docs/BRANCHING.md. An unattended PR-create call must pin this explicitly or it
-// can silently target the wrong repository.
-const GH_REPO = 'ChrisMiho/tortoise-wow'
+// directly (see docs/BRANCHING.md).
+//
+// BASE_BRANCH is normally cm-main, but backlog-drain resolves it to a
+// dependency's own backlog/<slug> branch when the artifact declares
+// depends-on: and that dependency's PR hasn't merged yet -- targeted
+// stacking, not a fresh cm-main cut every tick. Every phase below already
+// references BASE_BRANCH by template literal, so this is the only line that
+// needs to change for stacking to propagate through Implement/Review.
+//
+// Validated rather than trusted, same reasoning as branchName below: this
+// flows straight into "git fetch" and "git diff", so an unexpected value
+// fails safe to cm-main rather than being passed through.
+const BASE_BRANCH_PATTERN = /^(cm-main|backlog\/[a-z0-9][a-z0-9_-]*)$/
+const requestedBaseBranch = typeof normalizedArgs.baseBranch === 'string' ? normalizedArgs.baseBranch.trim() : ''
+let BASE_BRANCH
+if (BASE_BRANCH_PATTERN.test(requestedBaseBranch)) {
+  BASE_BRANCH = requestedBaseBranch
+} else {
+  if (requestedBaseBranch) {
+    log(`baseBranch was not a recognized ref (got ${JSON.stringify(normalizedArgs.baseBranch)}) -- defaulting to cm-main`)
+  }
+  BASE_BRANCH = 'cm-main'
+}
 
 phase('Implement')
 const implemented = await agent(
@@ -157,6 +156,37 @@ const implemented = await agent(
    commit style (run "git log --oneline -20" first to match the voice).
    Do not push and do not open a PR — a later phase does that.
 
+   If this fix requires a new SQL migration under sql/database_updates/,
+   generate its filename with sql/touch_migration.sh (or sql/make_migration.bat
+   on Windows) to get a real UTC timestamp — do not hand-write a timestamp.
+   Then rename the resulting file to insert this artifact's number before the
+   suffix: <timestamp>_${artifactLabel.match(/(\d{3})-/)?.[1] || 'XXX'}_world.sql
+   instead of <timestamp>_world.sql. This guarantees uniqueness even if
+   another tick generates a migration with the same timestamp — the artifact
+   number differs by construction.
+
+   If, after investigating, the artifact's acceptance criteria cannot be
+   satisfied in this environment -- missing data, missing tooling, a decision
+   only a human can make, not something any code change here can fix -- say
+   so plainly. Still create the branch (backlog-drain needs a real branch
+   name back either way), but make no commit, return blocked: true, and put
+   a specific explanation in blockedReason. Do not fabricate data or write a
+   partial implementation to make the criteria look satisfied when they
+   aren't really verifiable.
+
+   Describe, concretely, how a human would confirm this fix actually works
+   in-game once it's running on a live server -- specific enough to follow as
+   a checklist (e.g. "board the Menethil Harbor - Theramore boat as a bot and
+   confirm it doesn't fall through the deck", not "test transports"). If part
+   of that check could be confirmed from server logs or console output rather
+   than requiring a human to look (e.g. a specific log line, an absence of a
+   specific error), say so explicitly -- a later batch step will attempt
+   whatever's actually scriptable and leave the rest for manual testing.
+   Return this as inGameCheck. Every artifact needs one, even a low-risk
+   change -- if you're confident it needs no in-game confirmation beyond the
+   generic "server starts, bots spawn" smoke test, say that explicitly rather
+   than leaving it vague.
+
    Return:
    - the exact branch name you created
    - a one-paragraph summary of the change you made
@@ -171,10 +201,19 @@ if (!implemented) {
   return { success: false, reason: 'implement phase failed to produce a change' }
 }
 
-// Everything downstream -- including a real "git push" -- trusts this string.
-// If the agent handed back the base branch (or anything else that isn't the
-// backlog/<slug> branch it was told to create), stop here rather than pushing
-// to whatever ref it named.
+if (implemented.blocked === true) {
+  return {
+    success: false,
+    blocked: true,
+    reason: implemented.blockedReason || 'implement phase reported the acceptance criteria are unsatisfiable in this environment, with no reason given',
+    branchName: typeof implemented.branchName === 'string' ? implemented.branchName.trim() : undefined,
+  }
+}
+
+// Everything downstream -- including a later batch step's real "git push" --
+// trusts this string. If the agent handed back the base branch (or anything
+// else that isn't the backlog/<slug> branch it was told to create), stop here
+// rather than letting a bad ref reach that push.
 const branchName = typeof implemented.branchName === 'string' ? implemented.branchName.trim() : ''
 if (!BRANCH_NAME_PATTERN.test(branchName)) {
   return {
@@ -187,11 +226,11 @@ phase('Review')
 const lenses = [
   {
     key: 'correctness',
-    prompt: 'Review this diff for logic bugs and for behavior that does not match the acceptance criteria in the artifact.',
+    prompt: 'Review this diff for logic bugs and for behavior that does not match the acceptance criteria in the artifact. If a finding is that the acceptance criteria are fundamentally unsatisfiable in this environment -- not something the implementer coded wrong, but something no code change here can fix -- set blocked: true on that finding in addition to severity: blocking.',
   },
   {
     key: 'lifetime-threading',
-    prompt: 'Review this diff for pointer/reference lifetime issues and unsynchronized access to shared state. This server runs ~1000 concurrent playerbots and has a history of dangling-pointer and missing-lock bugs in exactly this kind of change.',
+    prompt: 'Review this diff for pointer/reference lifetime issues and unsynchronized access to shared state. This server runs ~1000 concurrent playerbots and has a history of dangling-pointer and missing-lock bugs in exactly this kind of change. If a finding is that the acceptance criteria are fundamentally unsatisfiable in this environment -- not something the implementer coded wrong, but something no code change here can fix -- set blocked: true on that finding in addition to severity: blocking.',
   },
 ]
 const reviews = await parallel(lenses.map((lens) => () =>
@@ -212,7 +251,7 @@ const reviews = await parallel(lenses.map((lens) => () =>
      Report every real finding with a one-sentence summary, the file it's in,
      and a severity of "blocking" or "minor". Return an empty findings array
      if there's nothing to flag.`,
-    { phase: 'Review', label: `review:${lens.key}`, schema: REVIEW_SCHEMA }
+    { phase: 'Review', label: `review:${lens.key}`, schema: REVIEW_SCHEMA, effort: 'medium' }
   )
 ))
 
@@ -224,6 +263,22 @@ if (returnedReviews.length < lenses.length) {
 const allFindings = returnedReviews.flatMap((r) => r.findings || [])
 const blocking = allFindings.filter((f) => f.severity === 'blocking')
 const minor = allFindings.filter((f) => f.severity === 'minor')
+
+// Checked across ALL findings, not just severity: blocking -- a lens can set
+// blocked: true on a minor-severity finding too, and that signal must still
+// stop the artifact from reaching status: implemented with an unsatisfiable
+// acceptance criterion silently shipped.
+const blockingInfeasible = allFindings.filter((f) => f.blocked === true)
+if (blockingInfeasible.length > 0) {
+  return {
+    success: false,
+    blocked: true,
+    reason: `review found the acceptance criteria unsatisfiable in this environment: ${blockingInfeasible.map((f) => f.summary).join('; ')}`,
+    branchName,
+  }
+}
+
+let contestedFindings = null
 if (blocking.length > 0) {
   const fixResult = await agent(
     `On branch "${branchName}", fix these blocking review findings, then amend
@@ -234,86 +289,22 @@ if (blocking.length > 0) {
      commit on that branch. If any of them can't or shouldn't be fixed
      (contradictory acceptance criteria, out of scope, not a real defect),
      return fixed: false and put one entry per unfixed finding in unresolved,
-     each saying which finding it is and why it wasn't fixed. Do not report
-     fixed: true with caveats — this run only proceeds to a PR on fixed: true.`,
+     each saying which finding it is and, specifically, WHY you believe it's
+     wrong or shouldn't be fixed -- this rebuttal goes verbatim into the PR
+     body for a human to adjudicate, so make the actual argument, not just
+     "disagreed". Do not report fixed: true with caveats.`,
     { phase: 'Review', label: 'apply-fixes', schema: FIX_SCHEMA }
   )
-  if (!fixResult || fixResult.fixed !== true) {
-    const unresolved = fixResult && Array.isArray(fixResult.unresolved) && fixResult.unresolved.length > 0
-      ? fixResult.unresolved.join('; ')
-      : describe(fixResult)
-    return { success: false, reason: `blocking findings not addressed: ${unresolved}`, branchName }
+  const hasRebuttal = fixResult && Array.isArray(fixResult.unresolved) && fixResult.unresolved.length > 0
+  if (!fixResult || (fixResult.fixed !== true && !hasRebuttal)) {
+    // No usable result at all -- not a defensible disagreement, a broken fix attempt.
+    return { success: false, reason: `blocking findings not addressed: ${describe(fixResult)}`, branchName }
+  }
+  if (fixResult.fixed !== true) {
+    contestedFindings = fixResult.unresolved
   }
 }
 
-phase('Verify')
-const verifyNote = await agent(
-  `Check whether a C++ build toolchain (cmake plus a compiler) is available in this
-   environment. If so, attempt to configure and build the affected target from branch
-   "${branchName}". Branch refs are shared across worktrees in this
-   repository, but building needs actual files on disk: locate an existing checkout of
-   that branch with "git worktree list" (the Implement phase's worktree, not yet
-   cleaned up) rather than assuming your current directory has it checked out, and
-   confirm you're on the right commit ("git rev-parse HEAD" should match "git rev-parse
-   ${branchName}") before concluding anything about whether it builds.
-   Report whether the build succeeded. If no toolchain is available, or a build isn't
-   reasonably feasible here, say so plainly rather than implying it compiles. Keep the
-   answer to 2-3 sentences — it goes verbatim into a PR description.`,
-  { phase: 'Verify', label: 'verify' }
-)
-
-phase('PR')
-if (dryRun) {
-  log(`[dry run] would push ${branchName} and open a PR against ${BASE_BRANCH} on ${GH_REPO}`)
-  return { success: true, dryRun: true, branchName, verifyNote: verifyNote || '' }
-}
-
-// Minor review findings are non-blocking, but this repo has no CI, so the human
-// reading the PR is the only one who will ever see them. Surface them there.
-const minorSection = minor.length > 0
-  ? `
-   7. A section headed "Automated review — non-blocking findings", listing exactly
-      these and nothing else, one bullet per line:
-${minor.map((f) => `      - ${f.file}: ${f.summary}`).join('\n')}`
-  : ''
-
-const prResult = await agent(
-  `Push branch "${branchName}" to origin, then open a pull request for it
-   against base branch ${BASE_BRANCH}. Branch refs are shared across
-   worktrees in this repository, so you do not need to check out or locate that
-   branch's worktree first -- from your current checkout, run "git push origin
-   ${branchName}" directly, then "gh pr create --repo ${GH_REPO} --head ${branchName}
-   --base ${BASE_BRANCH}" with the title and body below (the explicit
-   --repo/--head/--base flags avoid gh's default of resolving against upstream
-   instead of this fork, and avoid relying on whichever branch happens to be
-   checked out where you're running).
-
-   Title: a short summary of the fix, in this repo's existing commit-message voice.
-
-   Body must include, in this order:
-   1. The backlog artifact this implements: ${artifactLabel}
-   2. Problem, quoted verbatim: "${implemented.problem}"
-   3. Summary of the change made: ${implemented.summary}
-   4. Acceptance criteria, quoted verbatim: "${implemented.acceptanceCriteria}"
-   5. This verification note, verbatim: "${verifyNote || 'not available'}"
-   6. A line stating manual in-game testing is still required before merge${minorSection}
-
-   Return the URL of the pull request you opened, and nothing else in that field.
-   If you could not push or could not open the PR, say so in prUrl rather than
-   inventing a URL — the caller checks that it is a real GitHub PR URL.`,
-  { phase: 'PR', label: 'open-pr', schema: PR_SCHEMA }
-)
-
-// Without this check any truthy text -- including "I couldn't create the PR
-// because ..." -- would be recorded as a successfully opened PR.
-const prUrl = prResult && typeof prResult === 'object' ? prResult.prUrl : prResult
-const trimmedPrUrl = typeof prUrl === 'string' ? prUrl.trim() : ''
-if (!PR_URL_PATTERN.test(trimmedPrUrl)) {
-  return {
-    success: false,
-    reason: `PR phase did not return a pull request URL, got: ${describe(prResult)}`,
-    branchName,
-  }
-}
-
-return { success: true, branchName, prUrl: trimmedPrUrl }
+return contestedFindings
+  ? { success: true, contested: true, contestedFindings, branchName, summary: implemented.summary, problem: implemented.problem, acceptanceCriteria: implemented.acceptanceCriteria, inGameCheck: implemented.inGameCheck, minorFindings: minor }
+  : { success: true, branchName, summary: implemented.summary, problem: implemented.problem, acceptanceCriteria: implemented.acceptanceCriteria, inGameCheck: implemented.inGameCheck, minorFindings: minor }
