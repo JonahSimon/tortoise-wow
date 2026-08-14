@@ -12,11 +12,10 @@ cp .env.example .env
 # paste the password from /home/deck/tortoise-wow-server-V2/.dbpass into DB_PASS
 ```
 
-`.env` holds the database password in plaintext. It is excluded from commits via
-`.git/info/exclude` in this checkout — but that is **local only**. The matching
-`.gitignore` line exists in the working tree and is **not yet committed**, so a
-fresh clone of this repo does not inherit the protection. Commit it when the
-concurrent `fork-migration` work in `.gitignore` has landed.
+`.env` holds the database password in plaintext. It is excluded two ways: by
+`.gitignore:27`, which is committed and so inherited by a fresh clone, and by
+`.git/info/exclude` in this checkout, which is local only. Both are deliberate —
+the local rule predates the committed one and is harmless to keep.
 
 `.env` also points `TW_DATA`, `TW_ETC` and `TW_LOGS` at the existing stack
 directory. That is deliberate: the extracted client data is several gigabytes and
