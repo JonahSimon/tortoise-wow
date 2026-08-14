@@ -10,7 +10,11 @@ depends-on:
 **Problem:** The stack cannot hold a dense world. `docs/alive-world/STATUS.md`
 records mangosd at **~4.67 GiB RSS with ~201 online bots**, on an 8 GB WSL that
 was already using ~1.1 GiB of swap, and slow character logins were traced to
-that swapping rather than to bot count. The upstream fork's owner reports
+that swapping rather than to bot count. **That figure is historical, not the
+baseline** — it was taken before the VM was raised to 16 CPUs / 24 GB on
+2026-08-14, so the swap pressure in it is an artifact of the old ceiling. Use it
+as motivation and as a rough sanity check on the fit, never as a measured "before"
+to compare a later run against; this artifact measures its own baseline. The upstream fork's owner reports
 **2000 bots in 1 GB** on their Turtle server, so the gap is roughly two orders
 of magnitude per bot — but their optimizations have not been shared, and it is
 unknown whether the win is configuration, allocation-level code work, or an
@@ -91,12 +95,22 @@ the three `provenance.sh` reads — so this is a small repair, not a redesign.
   updated to the new name if it is renamed. That doc's other reference,
   `tests/playerbot-verify.sh`, is still missing from this repo — either restore
   it or delete the reference.
-- A **baseline ramp** is captured across at least three bot counts — 50, 200,
-  400 at minimum, continuing upward while stop gates hold — each held long
-  enough for RSS to plateau. Stop gates are the ones already used in
-  `docs/alive-world/STATUS.md`: host free ≥ 4 GB, WSL available ≥ 800 MB, no
-  Docker OOM or container restarts, client still playable. The ramp stops at
-  the first gate trip and the doc records which gate tripped at what count.
+- A **baseline ramp** is captured across at least five bot counts — 50, 200,
+  400, 800, 1000 at minimum, continuing upward while stop gates hold — each
+  held long enough for RSS to plateau. Stop gates: host free ≥ 4 GB (now the
+  tight one — see *Environment*), VM available ≥ 2 GB, no Docker OOM or
+  container restarts, client still playable. The ramp stops at the first gate
+  trip and the doc records which gate tripped at what count.
+
+  **A 1000-bot baseline is expected to fit now and is no longer optional.** The
+  original idea asked for exactly that and an earlier version of this artifact
+  ruled it out as impossible — correctly, against the 8 GB VM this stack ran on
+  until 2026-08-14. At 23.5 GiB it is reachable: extrapolating the one figure we
+  have (~4.67 GiB at ~201 bots) over a plausible 2 GiB intercept gives roughly
+  13-14 MB/bot, so ~1000 bots lands near 15-16 GiB — comfortably inside the VM,
+  with the host-free gate more likely to bind than the VM's own memory. Treat
+  that as the estimate it is, not a prediction to defend: the measured fit
+  replaces it, and if the ramp gates out earlier, record where and why.
 - The **bot-free intercept** is measured, not inferred: mangosd up with
   `MaxRandomBots = 0` (or the stack under `ai-dev-profile.sh off` with bots
   disabled), RSS recorded once the world has finished loading.
@@ -176,15 +190,25 @@ database password, so the recovered scripts pointing at
 wrong.
 
 *Environment.* The drain has full control of the stack for this run: it may
-stop/start the compose stack, edit `Min/MaxRandomBots`, restart mangosd
-repeatedly, and — per `docs/alive-world/CONTINUE-LATER.md` — raise WSL from
-8 GB to 12 GB in `C:\Users\mihov\.wslconfig` and restart WSL to get further up
-the ramp. Run `scripts/backup-alive-world-pre.sh` before the first config
-change. A WSL restart kills everything else in WSL, so it must be recorded in
-the doc when it happens, and figures either side of it must never be compared
-as if they came from the same configuration: the doc reports which ramp points
-were taken at 8 GB and which at 12 GB. Never `docker compose down -v` — that
-volume is the entire world and has been lost once already.
+stop/start the compose stack, edit `Min/MaxRandomBots`, and restart mangosd
+repeatedly. Run `scripts/backup-alive-world-pre.sh` before the first config
+change. Never `docker compose down -v` — that volume is the entire world and
+has been lost once already.
+
+**No WSL restart is needed, and none should be performed.** An earlier version
+of this artifact authorised raising WSL from 8 GB to 12 GB per
+`docs/alive-world/CONTINUE-LATER.md`; that is obsolete. The VM was raised to
+**16 CPUs / 24 GB** on 2026-08-14 (`docker info` confirms 16 CPUs / 23.5 GiB) —
+see `docs/superpowers/plans/2026-08-14-docker-build-speedup-handoff.md`. The
+headroom this artifact needed already exists, so the one genuinely dangerous
+step in the original scope — a `wsl --shutdown` that takes Docker's engine down
+mid-run — is off the table. If a ramp ever does exhaust 24 GB, record that as a
+finding and stop; do not resize the VM to push further, because every figure
+either side of a resize is from a different machine and cannot be compared.
+
+Note the host keeps only ~8 GB of its 32 GB while the VM holds 24 GB, so the
+existing **host free ≥ 4 GB** stop gate is now the tight one rather than a
+formality. Report host free alongside VM figures at every ramp point.
 
 *Feasibility.* This needs a working stack per `docs/DOCKER.md` and enough bot
 accounts for the ramp — `RandomBotAccountCount` is 500 per
@@ -195,11 +219,21 @@ not failed — but the static half (code analysis, object sizes, script repairs,
 plan) should still be delivered, with the doc stating clearly that no
 measurement was taken and every number in it is an estimate.
 
-*Scope.* The 1000-, 2000- and 3000-bot runs the original idea asks for are
-deliberately **out of scope here** — they cannot fit before the optimizations
-land. They belong in a follow-up artifact scoped after the plan's items have
-been implemented, at which point the same repaired ramp script re-runs and the
-before/after comparison is apples to apples. Note that requirement in the doc so
-the CSV format is designed to make the later comparison possible.
+*Scope.* The **1000-bot** run the original idea asks for is now **in scope** —
+see the ramp criterion above. The 24 GB VM changed this; it was genuinely
+impossible at 8 GB.
+
+The **2000- and 3000-bot** runs stay out of scope, and for an unchanged reason:
+at an estimated ~13-14 MB/bot, 2000 bots needs roughly 29 GiB against a 23.5 GiB
+ceiling. More headroom would not fix that — closing it is what the optimizations
+are *for*, which is the whole point of measuring first. Those runs belong in a
+follow-up artifact scoped after the plan's items land, at which point the same
+ramp script re-runs and the before/after comparison is apples to apples. Note
+that requirement in the doc so the CSV format is designed to make the later
+comparison possible.
+
+If the measured fit comes back materially cheaper per bot than the estimate
+above, say so explicitly — it would mean 2000 bots is closer than assumed, and
+that changes how ambitious the optimization plan needs to be.
 
 *Source.* `docs/memory-efficiency/idea.md`.
