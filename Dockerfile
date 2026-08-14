@@ -20,11 +20,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Build context is the repo root, so the repo lands at /src directly.
 COPY . /src
 
-# 4 CPUs / 8 GB in the Docker VM. -j2 is what fits: each heavy translation unit
-# in this tree peaks around 1-2 GB, and -j4 invites the OOM killer partway
-# through a ~30-minute compile. Raise via --build-arg BUILD_JOBS=3 if the VM
-# has been given more memory.
-ARG BUILD_JOBS=2
+# 16 CPUs / 24 GB in the Docker VM (see docs/DOCKER.md and C:\Users\mihov\.wslconfig
+# on Windows hosts running the WSL2 backend). -j10 is what fits: each heavy
+# translation unit in this tree peaks around 1-2 GB, so 10 concurrent jobs can
+# reach ~20 GB worst case, leaving headroom for the OS and Docker daemon inside
+# the VM. CPU is not the binding constraint here — memory is. Lower via
+# --build-arg BUILD_JOBS=N (or the scripts/rebuild.sh BUILD_JOBS env var) if the
+# VM's memory allocation is ever reduced, or if the VM OOMs mid-compile.
+ARG BUILD_JOBS=10
 
 # CMAKE_INSTALL_PREFIX is COMPILED IN (SYSCONFDIR is baked at build time), so the
 # prefix chosen here is where the binaries look for their configs forever. Moving

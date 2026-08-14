@@ -2,7 +2,7 @@
 # Rebuild the server image from this checkout, verify it, then promote it.
 #
 # Run from WSL:   ./scripts/rebuild.sh
-#                 BUILD_JOBS=1 ./scripts/rebuild.sh     # if the VM OOMs
+#                 BUILD_JOBS=4 ./scripts/rebuild.sh     # if the VM OOMs
 #
 # Builds to tortoise-cm:candidate, runs its acceptance checks, and moves the
 # :local tag ONLY if every one passes. A failed check leaves :local pointing at
@@ -16,7 +16,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO"
 
-JOBS="${BUILD_JOBS:-2}"
+JOBS="${BUILD_JOBS:-10}"
 
 # Git Bash puts docker.exe on PATH, so the guard below passes there and the build
 # runs to completion — but MSYS rewrites POSIX absolute paths handed to a native
