@@ -56,3 +56,42 @@ three of them from either platform.
 **Notes:** Per `docs/playerbots/BOT-TRANSPORT-INVESTIGATION.md` ("D2", the
 paragraph on why a radius bound is the wrong fix). Split out of artifact 004,
 which now fixes only the guid bug and the missing null check.
+
+**Re-validated 2026-08-14** against `feature/loop-refinement`. The defect is
+unchanged and the acceptance criteria still hold, but three things above are now
+inaccurate or weaker than when this was filed:
+
+1. **Line references have drifted.** The predicate is at `WorldPosition.cpp:1296`
+   (not `:1287`); `getCreaturesNear`/`getGameObjectsNear` are at `:1307`/`:1314`
+   (not `:1298-1310`); the `TravelNode` call is at `:2444` (not `:2417`).
+   `ObjectMgr.h:1234` and `RandomPlayerbotMgr.cpp:3017` are still exact.
+2. **The per-tick argument is narrower than stated.** This was filed while
+   `Map::GetTransports` was the stub artifact 001 fixed. That fix landed
+   (`Map.h:473`), so boats and zeppelins now match at
+   `WorldPosition.cpp:575-577` and return before reaching the scan. The fallback
+   fires only for type-11 elevators/trams or when the entry misses on the
+   current map — a far smaller set of bots than "every bot waiting at a
+   transport". Bots already *on* a transport never reach it either
+   (`MovementActions.cpp:459-479`).
+3. **The load-time cost is the stronger case, and this artifact underweights
+   it.** `TravelNode.cpp:2444` does a full-map walk *once per transport path*
+   inside elevator/tram node generation — O(paths x spawns) — and
+   `TravelNode.cpp:2317`, `RandomPlayerbotMgr.cpp:3017` and `:3049` each add an
+   unconditional full walk at graph generation. Note those callers pass
+   `entry = 0` and want everything, so an entry index does not help them; they
+   need their own treatment.
+
+Two caveats on cost and sequencing: `m_GameObjectDataMap` is a
+`robin_hood::unordered_map` (`ObjectMgr.h:288`) — flat open-addressing, so the
+walk is a linear scan over a contiguous array rather than pointer-chasing, and
+the constant factor is better than "meaningful CPU sink" implies. Nothing here
+has been profiled, and nothing in the transport stack has been verified in-game,
+so this optimizes a path not yet proven to work.
+
+*Renumbered from `010` to `012` on 2026-08-14* so that
+`011-bot-memory-baseline-and-investigation.md` drains first — the drain has no
+priority field, only the numeric prefix, so reordering means renaming. There is
+no artifact `010`; the gap is this move, not a deleted file. This artifact was
+never picked up under either number. The dated plan documents under
+`docs/superpowers/plans/` still refer to it as `010` in their historical
+narrative, annotated in place.

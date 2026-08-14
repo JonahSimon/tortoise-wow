@@ -133,5 +133,6 @@ Not blockers for merging, recorded so they are not mistaken for regressions:
   Confirm during the same in-game pass.
 - **`#12` introduces a new pending artifact**,
   `docs/backlog/010-index-go-spawn-lookup-by-entry.md`, which a future drain
-  run will pick up.
+  run will pick up. (Renumbered to `012-index-go-spawn-lookup-by-entry.md` on
+  2026-08-14.)
 - **Nothing in the stack has ever been compiled or run.** Every PR body says so.
