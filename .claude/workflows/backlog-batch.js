@@ -156,10 +156,12 @@ const imageTag = `tortoise-wow:${buildId}`
 const built = await agent(
   `On branch "${integrated.integrationBranch}" (in its own worktree), build the
    Docker image per docs/superpowers/plans/2026-08-11-docker-build-from-this-checkout.md:
-   "docker build" from the repo root of that worktree, with
-   -DBUILD_PLAYERBOTS=ON -DCMAKE_INSTALL_PREFIX=/opt/turtle and -j2 (the
-   Docker VM here is 4 CPUs/8GB -- higher parallelism invites the OOM
-   killer). Tag the resulting image ${imageTag}.
+   "docker build" from the repo root of that worktree. The Dockerfile already
+   bakes in -DBUILD_PLAYERBOTS=ON -DCMAKE_INSTALL_PREFIX=/opt/turtle and a
+   BUILD_JOBS default of 10 (the Docker VM is now 16 CPUs/24GB, see
+   docs/DOCKER.md) -- do not pass --build-arg BUILD_JOBS unless the build
+   OOMs, in which case retry with --build-arg BUILD_JOBS=4. Tag the resulting
+   image ${imageTag}.
 
    Run "docker build" itself from Windows PowerShell directly against that
    worktree's path -- the build context is just the repo directory and needs

@@ -153,13 +153,16 @@ prefer optimizations that leave headroom for that rather than spend it.
 **this** checkout to `tortoise-cm:candidate`, runs five acceptance checks, and
 moves the `:local` tag only if all pass. It must run **from WSL, not Git Bash**
 (it fails closed on `MSYSTEM`, because MSYS path rewriting once produced five
-false FAILs after a successful 40-minute compile). Budget ~40 minutes.
-`docker compose build` is a silent no-op — `docker-compose.yml` pins
-`image: tortoise-cm:local` with no `build:` key. The instrumented
-`MEMORY_MONITOR` build therefore costs a full cold compile, and cannot run
-while the server is up: the heavy playerbot translation units want 1.5-2.5 GiB
-per `g++` and the build OOMs above `-j2`, so bring the stack down with
-`ai-dev-profile.sh on` first, or use `BUILD_JOBS=1`.
+false FAILs after a successful compile). Budget ~10 minutes — the Docker VM
+is now 16 CPUs/24GB (`C:\Users\mihov\.wslconfig`) with `BUILD_JOBS=10` as the
+`Dockerfile` default (previously 4 CPUs/8GB and `BUILD_JOBS=2`, a ~40-minute
+build; see `docs/DOCKER.md`). `docker compose build` is a silent no-op —
+`docker-compose.yml` pins `image: tortoise-cm:local` with no `build:` key.
+The instrumented `MEMORY_MONITOR` build therefore costs a full cold compile.
+The heavy playerbot translation units still want 1.5-2.5 GiB per `g++`, so a
+build run while the server stack is also up and consuming memory can still
+OOM at `-j10` — if that happens, bring the stack down with
+`ai-dev-profile.sh on` first, or drop to `BUILD_JOBS=4`.
 
 *Source tree.* This checkout (`/mnt/c/Coding/tortoise-wow/tortoise-wow` from
 WSL) is what `rebuild.sh` builds. A second, **diverged** checkout exists at
