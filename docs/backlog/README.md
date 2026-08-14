@@ -48,9 +48,12 @@ tables — what breaks, under what load, traced to what.
   (`git worktree remove <path>` then `git branch -D <branch>`) — git refuses to
   check out a branch that's still checked out in another worktree, so a retry
   with the old one on disk just fails again with a confusing, unrelated-looking
-  error — then fix the artifact and reset it to `pending`. If the failed attempt
-  had already pushed its branch, delete it from `origin` as well, or the retry's
-  push is rejected as non-fast-forward.
+  error — then fix the artifact and reset it to `pending`. A `failed` tick's
+  branch was never pushed — `backlog-issue` only implements and reviews now;
+  it has no PR phase left to fail at — so there's no remote branch to clean up
+  here. (A stuck-mid-push risk now lives in `backlog-batch` instead, which
+  pushes and opens PRs for a whole accumulated batch at once — see
+  `backlog-drain`'s SKILL.md "Running a batch" section.)
 - **out-of-scope** — a human reviewed a `failed` attempt and accepted that the
   work cannot be done here as scoped: it needs a environment, data or decision
   this repo does not have. Not a retry candidate and not a defect to chase; the
@@ -66,8 +69,11 @@ tables — what breaks, under what load, traced to what.
   accumulated enough of them (or run out of `pending` work) to run one batch
   build instead of one per artifact — see
   `docs/superpowers/plans/2026-08-13-backlog-drain-refinements.md` Tasks 7-9.
-  Carries a `**Base:**` line recording the branch it was cut from and, if
-  applicable, the dependency it's stacked on.
+  Carries the lines `backlog-drain`'s SKILL.md appends when it reaches this
+  status: `**Base:**` (the branch it was cut from), `**Branch:**` (the exact
+  branch name, authoritative for the later batch pass), `**Summary:**`,
+  `**In-game check:**`, `**Minor findings:**` (if any were reported), and
+  `**Contested:**` (only if a review finding and the implementer disagreed).
 - **contested** — a PR was opened, but a review finding and the implementer
   disagreed and neither could be resolved autonomously. The PR body flags the
   dispute under a "Contested" heading with the finding and the implementer's
@@ -109,40 +115,57 @@ sections above and writes the file with the right number and slug.
 ## Draining artifacts
 
 Use the `backlog-drain` skill via `/loop backlog-drain` — it works through
-`pending` artifacts one at a time, fully autonomously through to an opened PR.
-See `docs/superpowers/specs/2026-08-11-backlog-workflow-design.md` for the
-full design.
+`pending` artifacts one at a time, fully autonomously, implementing and
+reviewing each to `status: implemented` on its own local branch. Once several
+`implemented` artifacts have accumulated (or the backlog runs out of
+`pending` work), it runs one `backlog-batch` pass to build, validate in the
+running stack, and open a PR per artifact in that batch — see
+`backlog-drain`'s SKILL.md "Running a batch" section. See
+`docs/superpowers/specs/2026-08-11-backlog-workflow-design.md` for the full
+design.
 
 ### Prerequisites
 
 Before a drain run:
 
 - **An authenticated `gh` CLI** (`gh auth status`) for the account that owns
-  the fork, with push rights to `origin`. Every non-dry-run tick pushes a
-  branch and runs `gh pr create` — no prompting, no fallback.
-- **A supervised pilot tick.** This automation is new and has never completed a
-  real unattended run, so before trusting it with the backlog: put one
-  throwaway artifact scoping a trivial change into this directory, run a single
-  tick with a human watching, and confirm the workflow actually received its
-  `artifactPath` and came back with a real PR URL (not a dry-run-shaped
-  result). Then close the throwaway PR and delete its branch, worktree, and
-  artifact. `backlog-drain`'s "Before trusting an unattended run" section spells
-  out exactly what to check.
-- **A human watching the first few real ticks.** Start the loop, don't walk
-  away from it. Each tick opens a PR against `cm-main`; there
-  is no CI and no test suite to catch a bad one.
+  the fork, with push rights to `origin`. Every `backlog-batch` pass pushes
+  a branch and runs `gh pr create` per artifact in that batch — no prompting,
+  no fallback.
+- **A supervised pilot run.** This automation is new and has never completed
+  a real unattended run, so before trusting it with the backlog: put one
+  throwaway artifact scoping a trivial change into this directory, run one
+  implement tick and then one batch pass by hand with a human watching, and
+  confirm both actually worked end to end, ending with a real PR URL. Then
+  close the throwaway PR and delete its branch, worktree, and artifact.
+  `backlog-drain`'s "Before trusting an unattended run" section spells out
+  exactly what to check at each step.
+- **A human watching the first few real ticks and the first real batch.**
+  Start the loop, don't walk away from it. Only a `backlog-batch` pass opens
+  PRs, against `cm-main` (or a stacked `backlog/<slug>` base) — one per
+  artifact accumulated in that batch — and there is no CI and no test suite
+  to catch a bad one.
 
 ### Stopping a drain
 
 Create `docs/backlog/.stop` (an empty file — `touch docs/backlog/.stop`) to
 halt the loop. `backlog-drain` checks for it at the very start of each tick,
 before picking a new artifact, so a stop request never aborts an issue
-mid-implementation: whatever is already in flight finishes (commit, and PR if
-it's a real run), and the loop halts before starting another. The sentinel
+mid-implementation: whatever is already in flight finishes (an implement tick
+just commits locally now, it no longer opens a PR), and the loop halts before
+starting another — but first, if any artifact is sitting at
+`status: implemented`, it runs one `backlog-batch` pass so nothing is left
+stranded waiting on a batch that would otherwise never trigger. The sentinel
 works whether or not anyone is watching the conversation. Drain reports a
-done/failed/in-progress/pending summary, deletes the sentinel, and stops.
+done/failed/in-progress/implemented/pending summary, deletes the sentinel,
+and stops.
 
-The loop also halts on its own when the backlog is drained, when two artifacts
-fail in a row, or when a failure looks systemic (a broken workflow invocation
-rather than a bad artifact) — in that last case the artifact is put back to
-`pending` rather than marked `failed`.
+The loop also halts on its own when the backlog is drained, when two
+artifacts fail in a row, when every remaining `pending` artifact is blocked
+on an unready dependency, when a failure looks systemic (a broken workflow
+invocation rather than a bad artifact — the artifact is put back to `pending`
+rather than marked `failed`), or when a `backlog-batch` pass itself fails
+(a build break, or nothing left to build after integration exclusions — every
+artifact in that batch stays at `status: implemented` for a human to retry or
+investigate, rather than being marked `failed`). See `backlog-drain`'s
+SKILL.md "Stopping the loop" section for the full detail.
