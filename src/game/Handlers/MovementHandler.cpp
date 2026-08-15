@@ -156,7 +156,7 @@ void WorldSession::HandleMoveWorldportAckOpcode()
     }
 
     GetPlayer()->SetMap(map);
-    if (Transport* t = GetPlayer()->GetTransport()) // Transport position may have changed while loading
+    if (GenericTransport* t = GetPlayer()->GetTransport()) // Transport position may have changed while loading
         t->UpdatePassengerPosition(GetPlayer());
     else
         GetPlayer()->Relocate(loc.x, loc.y, loc.z, loc.o);
@@ -1030,7 +1030,7 @@ void WorldSession::HandleMoveTimeSkippedOpcode(WorldPacket& recvData)
     if (_player->HasJustBoarded())
     {
         _player->SetJustBoarded(false);
-        if (Transport* pTransport = pMover->GetTransport())
+        if (GenericTransport* pTransport = pMover->GetTransport())
         {
             pTransport->SendOutOfRangeUpdateToPlayer(_player);
             pTransport->SendCreateUpdateToPlayer(_player);
@@ -1105,7 +1105,15 @@ void WorldSession::HandleMoverRelocation(Unit* pMover, MovementInfo& movementInf
             Unit* loadPetOnTransport = nullptr;
             if (!pPlayerMover->GetTransport())
             {
-                if (Transport* t = pPlayerMover->GetMap()->GetTransport(movementInfo.GetTransportGuid()))
+                // Only MO transports (boats, zeppelins) take real players aboard server-side. A
+                // client that reports a type-11 elevator, lift or tram car as its transport is
+                // animating that model itself and keeps reporting an authoritative
+                // transport-relative position, exactly as it did before LocalTransport existed:
+                // boarding it here would unsummon its pets, dismount it, and replace the position
+                // it reports with one derived from the server's animation mirror.
+                if (GenericTransport* t = movementInfo.GetTransportGuid().IsMOTransport()
+                                        ? pPlayerMover->GetMap()->GetTransport(movementInfo.GetTransportGuid())
+                                        : nullptr)
                 {
                     t->AddPassenger(pPlayerMover);
                     pPlayerMover->UpdateSavedVelocityPositionToCurrentPos();

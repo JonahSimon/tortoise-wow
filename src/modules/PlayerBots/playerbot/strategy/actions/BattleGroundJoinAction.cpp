@@ -658,6 +658,21 @@ bool BGJoinAction::isUseful()
     if (!bot->HasFreeBattleGroundQueueId())
         return false;
 
+    // An explicitly-set "bg type" is a decision already made -- by an operator via
+    // `.rndbot debug <bot> setvalueuin32 bg type,N`, or by the RPG battlemaster path
+    // (RpgSubActions.h:258). Execute() honours it directly and never consults bgList,
+    // so re-rolling the ambient composition heuristics here would only add variance
+    // to a choice that was not ours to make.
+    //
+    // Only on the commanded path, though. This also skips BotBattlegroundLimitReached(),
+    // which is reached only via shouldJoinBg() in the bgList loop below. A tournament
+    // wants a forced, deterministic queue; the general population should still be held
+    // to one instance per bracket. The battlemaster route sets "bg type" and then
+    // dispatches to "free bg join", so FreeBGJoinAction overrides
+    // honoursCommandedBgType() to false and falls through to the cap.
+    if (honoursCommandedBgType() && AI_VALUE(uint32, "bg type"))
+        return true;
+
     // reduce amount of healers in BG
     if ((ai->IsTank(bot, false) || ai->IsHeal(bot, false)) && urand(0, 100) > 20)
         return false;

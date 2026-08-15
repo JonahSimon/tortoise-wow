@@ -165,6 +165,9 @@ float TravelNodePath::getCost(Unit* unit, uint32 cGold)
                 if (!bot->isTaxiCheater() && taxiPath->price > cGold)
                     return -1;
 
+                // Only the destination has to be known up front: MovementAction::UseTaxi learns
+                // the source node on arrival (from the flight master when one is in range, by
+                // hand otherwise), the same way a player does by walking up to it.
                 if (!bot->isTaxiCheater() && !bot->m_taxi.IsTaximaskNodeKnown(taxiPath->to))
                     return -1;
 
@@ -901,6 +904,26 @@ void TravelPath::makeShortCut(WorldPosition startPos, float maxDist, Unit* bot)
     return;
 }
 
+//Is this the ground-side point of a dock hop? That is the first NODE_TRANSPORT point of a transport
+//sequence, with the point where the vehicle docks right behind it. makeDockNode stamps the
+//transport's entry on the dock hop, so a dock point can no longer be told apart from a ride point by
+//a zero entry. Both dock-hop points must still be walked through, the way they were when the hop
+//carried entry 0, so that getNextPoint stops on the vehicle's docking position and hands
+//UseTransport that position rather than the pier the hop starts from (ClosestCorrectPoint puts the
+//pier up to 20 yards away, well outside the INTERACTION_DISTANCE gate UseTransport applies).
+static bool isDockHopEntryPoint(std::vector<PathNodePoint>::iterator beg, std::vector<PathNodePoint>::iterator ed, std::vector<PathNodePoint>::iterator p)
+{
+    if (p->type != PathNodeType::NODE_TRANSPORT)
+        return false;
+
+    if (p == beg || std::prev(p)->type == PathNodeType::NODE_TRANSPORT) //We are already inside a transport sequence.
+        return false;
+
+    auto nextP = std::next(p);
+
+    return nextP != ed && nextP->type == PathNodeType::NODE_TRANSPORT;
+}
+
 bool TravelPath::shouldMoveToNextPoint(WorldPosition startPos, std::vector<PathNodePoint>::iterator beg, std::vector<PathNodePoint>::iterator ed, std::vector<PathNodePoint>::iterator p, float& moveDist, float maxDist)
 {
     if (p == ed) //We are the end. Stop now.
@@ -930,14 +953,16 @@ bool TravelPath::shouldMoveToNextPoint(WorldPosition startPos, std::vector<PathN
         return false; //Use the teleport
     }
 
-    //We are almost at a transport node. Move to the node before this.   
-    if (nextP->type == PathNodeType::NODE_TRANSPORT && nextP->entry)
+    //We are almost at a transport node. Move to the node before this.
+    if (nextP->type == PathNodeType::NODE_TRANSPORT && nextP->entry
+        && !isDockHopEntryPoint(beg, ed, nextP) //Keep walking, the dock itself is next.
+        && !isDockHopEntryPoint(beg, ed, p))    //We are on the dock, move on to where the vehicle stops.
     {
         return false;
     }
-    
+
     //We are moving to a transport node.
-    if (p->type == PathNodeType::NODE_TRANSPORT && p->entry)
+    if (p->type == PathNodeType::NODE_TRANSPORT && p->entry && !isDockHopEntryPoint(beg, ed, p))
     {
         if (nextP->type != PathNodeType::NODE_TRANSPORT && p != beg && std::prev(p)->type != PathNodeType::NODE_TRANSPORT) //We are not using the transport. Skip it.
             return true;

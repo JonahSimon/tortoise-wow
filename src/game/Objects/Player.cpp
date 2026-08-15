@@ -2043,7 +2043,7 @@ void Player::RelocateToLastClientPosition()
     }
 }
 
-void Player::GetSafePosition(float &x, float &y, float &z, Transport* onTransport) const
+void Player::GetSafePosition(float &x, float &y, float &z, GenericTransport* onTransport) const
 {
     if (!onTransport && m_movementInfo.ctime >  0)
     {
@@ -8149,7 +8149,7 @@ void Player::DismountCheck()
     }
 }
 
-void Player::SetTransport(Transport* t)
+void Player::SetTransport(GenericTransport* t)
 {
     WorldObject::SetTransport(t);
 
@@ -18294,7 +18294,11 @@ bool Player::SaveToDB(bool online, bool force, bool direct)
     uberInsert.addFloat(finiteAlways(m_movementInfo.GetTransportPos().y));
     uberInsert.addFloat(finiteAlways(m_movementInfo.GetTransportPos().z));
     uberInsert.addFloat(MapManager::NormalizeOrientation(finiteAlways(m_movementInfo.GetTransportPos().o)));
-    if (m_transport)
+    // Only an MO transport guid is worth persisting: LoadFromDB resolves this column through
+    // HashMapHolder<Transport>, and an unresolvable value teleports the character to its homebind.
+    // A LocalTransport (elevator, lift, tram car) is an ordinary grid gameobject that does not exist
+    // when the character loads, so those keep the plain world position saved above instead.
+    if (m_transport && m_transport->GetObjectGuid().IsMOTransport())
         uberInsert.addUInt32(m_transport->GetGUIDLow());
     else
         uberInsert.addUInt32(0);
@@ -20138,29 +20142,6 @@ void Player::CleanupFlagsOnTaxiPathFinished()
     RemoveFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_DISABLE_MOVE | UNIT_FLAG_TAXI_FLIGHT);
 }
 
-void Player::OnTaxiFlightEject(bool /*force*/)
-{
-    if (!IsTaxiFlying())
-        return;
-
-    // Order matters here. FlightPathMovementGenerator::Finalize calls
-    // TaxiStepFinished(), which starts the *next* leg whenever the itinerary still
-    // holds one - emptying it first is what turns "carry on" into "get off". The same
-    // clear is also what lets Finalize run the full landing cleanup, since it only
-    // stops movement, puts hostile references back online and settles PvP once
-    // GetTaxi() is empty.
-    m_taxi.ClearTaxiDestinations();
-
-    // ClearType finalises the flight generator wherever it sits on the stack rather
-    // than assuming it is on top, and Finalize then does
-    // CleanupFlagsOnTaxiPathFinished for us.
-    GetMotionMaster()->ClearType(FLIGHT_MOTION_TYPE);
-
-    // If the flight state outlived that, there was no flight generator to finalise.
-    // Clear the flags by hand rather than leave anyone marked as flying for good.
-    if (IsTaxiFlying())
-        CleanupFlagsOnTaxiPathFinished();
-}
 
 UnitMountResult Player::Mount(uint32 mount, uint32 spellId)
 {

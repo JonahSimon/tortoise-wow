@@ -59,6 +59,26 @@ void MoveSplineInit::Move(PathFinder const* pfinder)
         SetFly();
 }
 
+// A spline carries only the transport's low guid. MO transports (boats, zeppelins) live in the
+// global MO-transport holder; a LocalTransport (elevator, lift, tram car) is an ordinary grid
+// gameobject whose guid also carries its entry, so it cannot be looked up from a low guid at all -
+// it can only be the transport the unit is already riding. Without this fallback every spline
+// launched aboard an elevator resolved to no transport and kicked the passenger straight off it.
+// It can legitimately fail to resolve: the unit may have been detached from the car since (grid
+// unload, an earlier Launch, a teleport), and the caller must then not treat the spline's stored
+// position as a world position - see Launch().
+static GenericTransport* FindTransportByLowGuid(Unit const& unit, uint32 transportLowGuid)
+{
+    if (!transportLowGuid)
+        return nullptr;
+
+    if (Transport* moTransport = HashMapHolder<Transport>::Find(ObjectGuid(HIGHGUID_MO_TRANSPORT, transportLowGuid)))
+        return moTransport;
+
+    GenericTransport* current = unit.GetTransport();
+    return (current && current->GetGUIDLow() == transportLowGuid) ? current : nullptr;
+}
+
 static thread_local uint32 splineCounter = 1;
 
 int32 MoveSplineInit::Launch()
@@ -66,20 +86,24 @@ int32 MoveSplineInit::Launch()
     float realSpeedRun = 0.0f;
     MoveSpline& move_spline = *unit.movespline;
 
-    Transport* newTransport = nullptr;
-    if (args.transportGuid)
-        newTransport = HashMapHolder<Transport>::Find(ObjectGuid(HIGHGUID_MO_TRANSPORT, args.transportGuid));
+    GenericTransport* newTransport = FindTransportByLowGuid(unit, args.transportGuid);
     Vector3 real_position(unit.GetPositionX(), unit.GetPositionY(), unit.GetPositionZ());
     // there is a big chance that current position is unknown if current state is not finalized, need compute it
     // this also allows calculate spline position and update map position in much greater intervals
     if (!move_spline.Finalized())
     {
         real_position = move_spline.ComputePosition();
-        Transport* oldTransport = nullptr;
-        if (move_spline.GetTransportGuid())
-            oldTransport = HashMapHolder<Transport>::Find(ObjectGuid(HIGHGUID_MO_TRANSPORT, move_spline.GetTransportGuid()));
-        if (oldTransport)
-            oldTransport->CalculatePassengerPosition(real_position.x, real_position.y, real_position.z);
+        if (uint32 const oldTransportGuid = move_spline.GetTransportGuid())
+        {
+            if (GenericTransport* oldTransport = FindTransportByLowGuid(unit, oldTransportGuid))
+                oldTransport->CalculatePassengerPosition(real_position.x, real_position.y, real_position.z);
+            else
+                // The transport that in-flight spline was launched on can no longer be resolved, so
+                // its position is a transport-local offset that cannot be transformed. Using it as a
+                // world position would teleport the unit by the whole offset (up to the length of a
+                // tram run), so fall back to where the unit actually is.
+                real_position = Vector3(unit.GetPositionX(), unit.GetPositionY(), unit.GetPositionZ());
+        }
     }
     if (newTransport)
         newTransport->CalculatePassengerOffset(real_position.x, real_position.y, real_position.z);

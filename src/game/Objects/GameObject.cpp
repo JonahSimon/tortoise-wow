@@ -52,6 +52,7 @@
 #include <G3D/Quat.h>
 #include "SuspiciousStatisticMgr.h"
 #include "PerfStats.h"
+#include "LocalTransport.h"
 
 bool QuaternionData::isUnit() const
 {
@@ -198,6 +199,35 @@ void GameObject::RemoveFromWorld()
     Object::RemoveFromWorld();
 }
 
+GameObject* GameObject::CreateGameObject(uint32 name_id)
+{
+    GameObjectInfo const* goinfo = sObjectMgr.GetGameObjectInfo(name_id);
+
+    // Type 11 is an elevator, a lift or a Deeprun Tram car. The client animates the model on a
+    // fixed local loop; LocalTransport mirrors that loop server-side so passengers that have no
+    // client of their own can be carried too.
+    if (goinfo && goinfo->type == GAMEOBJECT_TYPE_TRANSPORT)
+        return new LocalTransport();
+
+    return new GameObject();
+}
+
+GenericTransport* GameObject::ToGenericTransport()
+{
+    return dynamic_cast<GenericTransport*>(this);
+}
+
+GenericTransport const* GameObject::ToGenericTransport() const
+{
+    return dynamic_cast<GenericTransport const*>(this);
+}
+
+GameObject* GameObject::CreateGameObjectForSpawn(uint32 db_guid)
+{
+    GameObjectData const* data = sObjectMgr.GetGOData(db_guid);
+    return CreateGameObject(data ? data->id : 0);
+}
+
 bool GameObject::Create(uint32 guidlow, uint32 name_id, Map *map, float x, float y, float z, float ang, float rotation0, float rotation1, float rotation2, float rotation3, uint32 animprogress, GOState go_state)
 {
     MANGOS_ASSERT(map);
@@ -230,6 +260,10 @@ bool GameObject::Create(uint32 guidlow, uint32 name_id, Map *map, float x, float
     }
 
     SetObjectScale(sGuidObjectScaling.GetScale(GetGUID(), goinfo->size));
+
+    // The spawn pose is what a type-11 transport's create block reports to clients (they animate
+    // the model from it themselves), so it must stay put even when the server moves the object.
+    m_stationaryPosition = Position(x, y, z, ang);
 
     SetFloatValue(GAMEOBJECT_POS_X, x);
     SetFloatValue(GAMEOBJECT_POS_Y, y);
@@ -2365,7 +2399,7 @@ struct SpawnGameObjectInMapsWorker
                 sLog.outString("[CRASH] Spawning already spawned Gobj ! GUID=%u", i_guid);
                 return;
             }
-            GameObject* pGameobject = new GameObject;
+            GameObject* pGameobject = GameObject::CreateGameObject(i_data->id);
             //DEBUG_LOG("Spawning gameobject %u", *itr);
             if (!pGameobject->LoadFromDB(i_guid, map))
                 delete pGameobject;

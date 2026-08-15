@@ -564,22 +564,37 @@ bool WorldPosition::HasFaction(const Team team) const
 std::set<GenericTransport*> WorldPosition::getTransports(uint32 entry)
 {
     std::set<GenericTransport*> transports;
-    for (auto transport : getMap(getFirstInstanceId())->GetTransports()) //Boats&Zeppelins.
+
+    // getFirstInstanceId() falls back to 0 and FindMap misses for an instanciated or unloaded
+    // continent, so this is routinely null for the very cross-map dock queries bots make.
+    // Both lookups below dereference it, so bail out rather than read through null.
+    Map* map = getMap(getFirstInstanceId());
+    if (!map)
+        return transports;
+
+    for (auto transport : map->GetTransports()) //Boats&Zeppelins.
         if (!entry || transport->GetEntry() == entry)
             transports.insert(transport);
 
-    if (transports.empty() || !entry) //Elevators&rams
+    if (transports.empty() || !entry) //Elevators&trams
     {
-        // gopair->first is a bare spawn id, not an ObjectGuid. Handing it over
-        // straight compiled - ObjectGuid has a converting constructor from uint64 -
-        // but produced a guid whose high bits are 0 instead of HIGHGUID_GAMEOBJECT,
-        // so GetGameObject could never match it and this branch always came back
-        // empty. Built properly it needs the entry too, which is gopair->second.id.
+        // Deliberately unbounded. Callers pass a *dock* position and do their own
+        // distance selection afterwards, so the transport itself is routinely far away:
+        // the six Deeprun Tram cars sit in two clusters ~2460y apart on map 369, so any
+        // radius small enough to be worth calling a bound hides half of them from the
+        // dock the bot is standing on. A radius would not buy anything here either -
+        // DoGOData walks the whole spawn map regardless (the predicate never breaks) and
+        // the radius only prunes the result vector. Making this cheap needs an
+        // entry-indexed lookup, not a distance filter.
         for (auto gopair : getGameObjectsNear(0.0f, entry))
-            if (GameObject* go = getMap(getFirstInstanceId())->GetGameObject(
-                    ObjectGuid(HIGHGUID_GAMEOBJECT, gopair->second.id, gopair->first)))
+        {
+            // gopair->first is a spawn id, not an ObjectGuid - build the full guid before lookup.
+            ObjectGuid guid(HIGHGUID_GAMEOBJECT, gopair->second.id, gopair->first);
+
+            if (GameObject* go = map->GetGameObject(guid))
                 if (GenericTransport* transport = dynamic_cast<GenericTransport*>(go))
                     transports.insert(transport);
+        }
     }
 
     return transports;

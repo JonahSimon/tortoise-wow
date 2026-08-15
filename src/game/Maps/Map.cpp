@@ -29,6 +29,7 @@
 #include "InstanceData.h"
 #include "GridNotifiersImpl.h"
 #include "Transport.h"
+#include "LocalTransport.h"
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "World.h"
@@ -494,7 +495,11 @@ void Map::Add(Transport* obj)
 
     obj->SetMap(this);
     obj->AddToWorld();
-    _transports.insert(obj);
+    {
+        // Cross-map readers walk this set via GetTransports(); keep the insert exclusive.
+        std::unique_lock<std::shared_mutex> lock(_transports_lock);
+        _transports.insert(obj);
+    }
 
     // Broadcast creation to players
     obj->SendCreateUpdateToMap();
@@ -763,6 +768,24 @@ inline void Map::UpdateCells(uint32 map_diff)
     unitsMvtUpdate.clear();
 }
 
+// Drag the passengers of every occupied local transport (elevator, lift, tram car) along its
+// animation. These objects stay linked in the cell they were spawned in, so the cell visits above
+// only reach them while a player happens to stand near that one cell - a bot riding a tram car down
+// the tunnel would freeze mid-ride. Nothing happens for an unoccupied one; it is not in the list.
+void Map::UpdateCarryingTransports()
+{
+    // Relocating a passenger can drop it off the transport, which edits the list, so work on a copy.
+    std::vector<LocalTransport*> occupied;
+    {
+        std::unique_lock<std::mutex> lock(_carryingTransports_lock);
+        if (_carryingTransports.empty())
+            return;
+        occupied.assign(_carryingTransports.begin(), _carryingTransports.end());
+    }
+
+    for (const auto transport : occupied)
+        transport->MovePassengers();
+}
 
 void Map::ProcessSessionPackets(PacketProcessing type)
 {
@@ -892,6 +915,7 @@ void Map::Update(uint32 t_diff)
     uint32 playersUpdateTime = WorldTimer::getMSTimeDiffToNow(updateMapTime) - sessionsUpdateTime;
 
     UpdateCells(t_diff);
+    UpdateCarryingTransports();
     uint32 activeCellsUpdateTime = WorldTimer::getMSTimeDiffToNow(updateMapTime) - playersUpdateTime - sessionsUpdateTime;
 
     // Send world objects and item update field changes
@@ -1263,7 +1287,11 @@ void Map::Remove(Transport* obj, bool remove)
         obj->RemoveFromWorld();
 
     obj->SendOutOfRangeUpdateToMap();
-    _transports.erase(obj);
+    {
+        // Cross-map readers walk this set via GetTransports(); keep the erase exclusive.
+        std::unique_lock<std::shared_mutex> lock(_transports_lock);
+        _transports.erase(obj);
+    }
 
     obj->ResetMap();
     obj->RemoveMapReference(this);
@@ -1611,7 +1639,7 @@ void Map::SendInitSelf(Player * player)
     bool hasTransport = false;
 
     // attach to player data current transport data
-    if (Transport* transport = player->GetTransport())
+    if (GenericTransport* transport = player->GetTransport())
     {
         hasTransport = true;
         transport->BuildCreateUpdateBlockForPlayer(&data, player);
@@ -1621,7 +1649,7 @@ void Map::SendInitSelf(Player * player)
     player->BuildCreateUpdateBlockForPlayer(&data, player);
 
     // build other passengers at transport also (they always visible and marked as visible and will not send at visibility update at add to map
-    if (Transport* transport = player->GetTransport())
+    if (GenericTransport* transport = player->GetTransport())
         for (const auto itr : transport->GetPassengers())
             if (player != itr && player->IsInVisibleList(itr))
             {
@@ -2623,7 +2651,7 @@ Creature* Map::GetAnyTypeCreature(ObjectGuid guid)
     return nullptr;
 }
 
-Transport* Map::GetTransport(ObjectGuid guid)
+GenericTransport* Map::GetTransport(ObjectGuid guid)
 {
     if (guid.IsMOTransport())
     {
@@ -2632,8 +2660,9 @@ Transport* Map::GetTransport(ObjectGuid guid)
                 return pTransport;
     }
 
+    // Not an MO transport guid, so it is a type-11 gameobject: an elevator, a lift or a tram car.
     GameObject* go = GetGameObject(guid);
-    return go ? go->ToTransport() : nullptr;
+    return go ? go->ToGenericTransport() : nullptr;
 }
 
 /**
@@ -3073,7 +3102,7 @@ bool Map::GetLosHitPosition(float srcX, float srcY, float srcZ, float& destX, fl
     return result0;
 }
 
-bool Map::GetWalkHitPosition(Transport* transport, float srcX, float srcY, float srcZ, float& destX, float& destY, float& destZ, uint32 moveAllowedFlags, float zSearchDist, bool locatedOnSteepSlope) const
+bool Map::GetWalkHitPosition(GenericTransport* transport, float srcX, float srcY, float srcZ, float& destX, float& destY, float& destZ, uint32 moveAllowedFlags, float zSearchDist, bool locatedOnSteepSlope) const
 {
     if (!MaNGOS::IsValidMapCoord(srcX, srcY, srcZ))
     {
@@ -3218,7 +3247,7 @@ bool Map::GetSwimRandomPosition(float& x, float& y, float& z, float radius, Grid
     return false;
 }
 
-bool Map::GetWalkRandomPosition(Transport* transport, float& x, float& y, float& z, float maxRadius, bool allowStraightPath, uint32 moveAllowedFlags) const
+bool Map::GetWalkRandomPosition(GenericTransport* transport, float& x, float& y, float& z, float maxRadius, bool allowStraightPath, uint32 moveAllowedFlags) const
 {
     ASSERT(MaNGOS::IsValidMapCoord(x, y, z));
 

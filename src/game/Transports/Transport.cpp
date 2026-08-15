@@ -34,9 +34,9 @@
 #include "GameObjectModel.h"
 #include "ObjectAccessor.h"
 
-Transport::Transport() : GameObject(),
+Transport::Transport() : GenericTransport(),
     _transportInfo(nullptr), _isMoving(true), _pendingStop(false),
-    _passengerTeleportItr(_passengers.begin()), _pathProgress(0)
+    _pathProgress(0)
 {
     // the path progress is the only value that seem to matter
     m_updateFlag = UPDATEFLAG_TRANSPORT;
@@ -126,17 +126,6 @@ bool Transport::Create(uint32 guidlow, uint32 entry, uint32 mapid, float x, floa
     return true;
 }
 
-void Transport::CleanupsBeforeDelete()
-{
-    while (!_passengers.empty())
-    {
-        WorldObject* obj = *_passengers.begin();
-        RemovePassenger(obj);
-    }
-
-    GameObject::CleanupsBeforeDelete();
-}
-
 void Transport::Update(uint32 update_diff, uint32 /*time_diff*/)
 {
     uint32 const positionUpdateDelay = 50;
@@ -200,54 +189,6 @@ void Transport::Update(uint32 update_diff, uint32 /*time_diff*/)
             _currentFrame->Spline->evaluate_derivative(_currentFrame->Index, t, dir);
             UpdatePosition(pos.x, pos.y, pos.z, atan2(dir.y, dir.x) + M_PI);
         }
-    }
-}
-
-void Transport::AddPassenger(WorldObject* passenger)
-{
-    if (!IsInWorld())
-        return;
-
-    if (_passengers.insert(passenger).second)
-    {
-        DEBUG_LOG("Object %s added to transport %s.", passenger->GetName(), GetName());
-        passenger->SetTransport(this);
-        passenger->m_movementInfo.AddMovementFlag(MOVEFLAG_ONTRANSPORT);
-        passenger->m_movementInfo.t_guid = GetObjectGuid();
-        if (!passenger->m_movementInfo.t_pos.x)
-        {
-            passenger->m_movementInfo.t_pos.x = passenger->GetPositionX();
-            passenger->m_movementInfo.t_pos.y = passenger->GetPositionY();
-            passenger->m_movementInfo.t_pos.z = passenger->GetPositionZ();
-            passenger->m_movementInfo.t_pos.o = passenger->GetOrientation();
-            CalculatePassengerOffset(passenger->m_movementInfo.t_pos.x, passenger->m_movementInfo.t_pos.y, passenger->m_movementInfo.t_pos.z, &passenger->m_movementInfo.t_pos.o);
-        }
-    }
-}
-
-void Transport::RemovePassenger(WorldObject* passenger)
-{
-    bool erased = false;
-    if (_passengerTeleportItr != _passengers.end())
-    {
-        PassengerSet::iterator itr = _passengers.find(passenger);
-        if (itr != _passengers.end())
-        {
-            if (itr == _passengerTeleportItr)
-                ++_passengerTeleportItr;
-
-            _passengers.erase(itr);
-            erased = true;
-        }
-    }
-    else
-        erased = _passengers.erase(passenger) > 0;
-
-    if (erased)
-    {
-        passenger->SetTransport(nullptr);
-        passenger->m_movementInfo.ClearTransportData();
-        DEBUG_LOG("Object %s removed from transport %s.", passenger->GetName(), GetName());
     }
 }
 
@@ -403,55 +344,6 @@ bool Transport::TeleportTransport(uint32 newMapid, float x, float y, float z, fl
     MANGOS_ASSERT(m_maps.find(newMap) != m_maps.end());
 
     return newMap != oldMap;
-}
-
-void Transport::UpdatePassengerPositions(PassengerSet& passengers)
-{
-    for (const auto passenger : passengers)
-        UpdatePassengerPosition(passenger);
-}
-void Transport::UpdatePassengerPosition(WorldObject* passenger)
-{
-    // transport teleported but passenger not yet (can happen for players)
-    if (m_maps.find(passenger->FindMap()) == m_maps.end())
-        return;
-
-    // Do not use Unit::UpdatePosition here, we don't want to remove auras
-    // as if regular movement occurred
-    float x, y, z, o;
-    x = passenger->GetTransOffsetX();
-    y = passenger->GetTransOffsetY();
-    z = passenger->GetTransOffsetZ();
-    o = passenger->GetTransOffsetO();
-    CalculatePassengerPosition(x, y, z, &o);
-    if (!MaNGOS::IsValidMapCoord(x, y, z))
-    {
-        sLog.outError("[TRANSPORTS] Object %s [guid %u] has invalid position on transport.", passenger->GetName(), passenger->GetGUIDLow());
-        return;
-    }
-    switch (passenger->GetTypeId())
-    {
-        case TYPEID_UNIT:
-        {
-            Creature* creature = passenger->ToCreature();
-            passenger->GetMap()->CreatureRelocation(creature, x, y, z, o);
-            break;
-        }
-        case TYPEID_PLAYER:
-            //relocate only passengers in world and skip any player that might be still logging in/teleporting
-            if (passenger->IsInWorld())
-                passenger->GetMap()->PlayerRelocation(passenger->ToPlayer(), x, y, z, o);
-
-            break;
-        case TYPEID_GAMEOBJECT:
-            //passenger->GetMap()->GameObjectRelocation(passenger->ToGameObject(), x, y, z, o, false);
-            break;
-        case TYPEID_DYNAMICOBJECT:
-            //passenger->GetMap()->DynamicObjectRelocation(passenger->ToDynObject(), x, y, z, o);
-            break;
-        default:
-            break;
-    }
 }
 
 void Transport::DoEventIfAny(KeyFrame const& node, bool departure)

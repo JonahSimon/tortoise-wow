@@ -1554,7 +1554,7 @@ void BattleGround::SpawnObject(ObjectGuid guid, uint32 respawnTime)
         if (!obj)
         {
             // try loading it if spawn is not found
-            obj = new GameObject();
+            obj = GameObject::CreateGameObject(guid.GetEntry());
             if (!obj->LoadFromDB(guid.GetCounter(), map, true))
             {
                 delete obj;

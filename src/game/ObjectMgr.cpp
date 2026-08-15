@@ -623,6 +623,8 @@ void ObjectMgr::LoadPlayerCacheData(uint32 lowGuid)
     
     if (!result)
     {
+        if (lowGuid)
+            sLog.outError("CreateBotCacheDbg: LoadPlayerCacheData no row for guid=%u", lowGuid);
         return;
     }
 
@@ -634,11 +636,19 @@ void ObjectMgr::LoadPlayerCacheData(uint32 lowGuid)
         std::string name = fields[5].GetCppString();
         if (normalizePlayerName(name))
         {
+            if (lowGuid)
+                sLog.outString("CreateBotCacheDbg: LoadPlayerCacheData row ok guid=%u account=%u name=%s",
+                    fields[0].GetUInt32(), fields[4].GetUInt32(), name.c_str());
             PlayerCacheData* data = InsertPlayerInCache(fields[0].GetUInt32(), fields[1].GetUInt32(), fields[2].GetUInt32(),
                 fields[3].GetUInt32(), fields[4].GetUInt32(), name, fields[6].GetUInt32(), fields[7].GetUInt32(), fields[14].GetUInt8());
 
             UpdatePlayerCachedPosition(data, fields[8].GetUInt32(), fields[9].GetFloat(), fields[10].GetFloat(),
                 fields[11].GetFloat(), fields[12].GetFloat(), !fields[13].GetCppString().empty());
+        }
+        else if (lowGuid)
+        {
+            sLog.outError("CreateBotCacheDbg: normalizePlayerName failed guid=%u rawName='%s'",
+                lowGuid, fields[5].GetCppString().c_str());
         }
     }
     while (result->NextRow());
@@ -8708,7 +8718,7 @@ uint32 ObjectMgr::AddGOData(uint32 entry, uint32 mapId, float x, float y, float 
     // We use spawn coords to spawn
     if (!map->Instanceable() && map->IsLoaded(x, y))
     {
-        GameObject *go = new GameObject;
+        GameObject *go = GameObject::CreateGameObject(entry);
         if (!go->LoadFromDB(guid, map))
         {
             sLog.outError("AddGOData: cannot add gameobject entry %u to map", entry);
