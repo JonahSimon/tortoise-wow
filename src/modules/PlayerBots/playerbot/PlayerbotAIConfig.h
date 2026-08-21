@@ -1,6 +1,7 @@
 #pragma once
 
 #include <unordered_set>
+#include <map>
 #include "Config/Config.h"
 #include "Talentspec.h"
 #include "SharedDefines.h"
@@ -129,6 +130,23 @@ public:
     BotAutoLogin botAutologin;
     std::string randomBotMapsAsString;
     std::vector<uint32> randomBotMaps;
+    // Populate-Around-Players (F1) — concentrate level-appropriate bots into real-player zones
+    bool populateAroundPlayers;
+    float populateProbTeleport;
+    uint32 populateDensityDefault;
+    uint32 populatePeerBand;
+    float populatePeerFraction;
+    float populateSoloFactionRatio;
+    float populateMinorityFloor;
+    std::map<uint32, uint32> populateDensityOverrides;
+    std::vector<uint32> populateStarterZones;
+    std::vector<uint32> populateSanctuaryZones;
+    bool populateSoftenEnemyPvp;
+    float populateSoftenReactMult;
+    // F2 — Overland travel parties (bots march city -> dungeon entrance, then disband)
+    bool travelParties;
+    bool travelPartyTestMode;
+    uint32 travelPartyDungeonSize;
     std::list<uint32> randomBotQuestItems;
     std::list<uint32> randomBotAccounts;
     std::unordered_set<uint32> nonRandomBotAccounts;

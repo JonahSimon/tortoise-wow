@@ -5050,3 +5050,40 @@ AiPlayerbot.HealDistance = 30
 # The same for battlegrounds, where tighter is better. Previously this was a hard
 # halving of the value above, which tied the two together for no good reason.
 AiPlayerbot.HealDistanceBg = 25
+#
+# =====================================================================
+#    POPULATE-AROUND-PLAYERS (F1) — custom feature, default off
+#    Concentrates level-appropriate bots into zones containing real
+#    players, with faction / territory / density rules.
+# =====================================================================
+AiPlayerbot.PopulateAroundPlayers = 0
+AiPlayerbot.PopulateProbTeleport = 0.4
+AiPlayerbot.PopulateDensityDefault = 25
+AiPlayerbot.PopulateDensityOverrides = "33:40,17:40,440:40,357:40,16:40,490:40"
+AiPlayerbot.PopulatePeerBand = 7
+AiPlayerbot.PopulatePeerFraction = 0.7
+AiPlayerbot.PopulateSoloFactionRatio = 0.7
+AiPlayerbot.PopulateMinorityFloor = 0.35
+# Zone IDs, ported from the AzerothCore source and checked against Turtle's
+# AreaTable.dbc (2026-08-21): the wotlk-era starter zones 3430/3524 and
+# sanctuary zones 3487/3557/3703/4395 don't exist here and were dropped rather
+# than guessed at. 5180 (Gilneas City, a Turtle-added capital) was added to
+# sanctuary since it fits the existing pattern of capitals on this list.
+# Turtle's actual custom-race starter zones (candidates: 4015 Isle of the
+# Spirits, 5225 Thalassian Highlands) are still unconfirmed - verify in-game
+# before relying on this list for anything beyond the current 6 entries.
+AiPlayerbot.PopulateStarterZones = "1,12,14,85,141,215"
+AiPlayerbot.PopulateSanctuaryZones = "1497,1519,1537,1637,1638,1657,5180"
+AiPlayerbot.PopulateSoftenEnemyPvp = 1
+AiPlayerbot.PopulateSoftenReactMult = 2.0
+#
+# =====================================================================
+#    OVERLAND TRAVEL PARTIES (F2) — custom feature, default off
+#    Bots muster at a city and march on foot to a dungeon entrance,
+#    then disband (no enter/clear). Route/coords still need re-authoring
+#    for this map before this is usable - see the port plan.
+#    GM command (GM level 3): .playerbots travelparty
+# =====================================================================
+AiPlayerbot.TravelParties = 0
+AiPlayerbot.TravelPartyTestMode = 0
+AiPlayerbot.TravelPartyDungeonSize = 5

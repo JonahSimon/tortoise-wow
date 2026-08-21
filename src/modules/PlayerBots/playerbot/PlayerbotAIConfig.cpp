@@ -234,6 +234,39 @@ bool PlayerbotAIConfig::Initialize()
     LoadList<std::list<uint32> >(config.GetStringDefault("AiPlayerbot.RandomBotSpellIds", "54197"), randomBotSpellIds);
 	LoadList<std::list<uint32> >(config.GetStringDefault("AiPlayerbot.PvpProhibitedZoneIds", "2255,656,2361,2362,2363,976,35,2268,3425,392,541,1446,3828,3712,3738,3565,3539,3623,4152,3988,4658,4284,4418,4436,4275,4323"), pvpProhibitedZoneIds);
 
+    // Populate-Around-Players (F1)
+    populateAroundPlayers = config.GetBoolDefault("AiPlayerbot.PopulateAroundPlayers", false);
+    populateProbTeleport = config.GetFloatDefault("AiPlayerbot.PopulateProbTeleport", 0.4f);
+    populateDensityDefault = config.GetIntDefault("AiPlayerbot.PopulateDensityDefault", 25);
+    populatePeerBand = config.GetIntDefault("AiPlayerbot.PopulatePeerBand", 7);
+    populatePeerFraction = config.GetFloatDefault("AiPlayerbot.PopulatePeerFraction", 0.7f);
+    populateSoloFactionRatio = config.GetFloatDefault("AiPlayerbot.PopulateSoloFactionRatio", 0.7f);
+    populateMinorityFloor = config.GetFloatDefault("AiPlayerbot.PopulateMinorityFloor", 0.35f);
+    populateSoftenEnemyPvp = config.GetBoolDefault("AiPlayerbot.PopulateSoftenEnemyPvp", true);
+    populateSoftenReactMult = config.GetFloatDefault("AiPlayerbot.PopulateSoftenReactMult", 2.0f);
+    LoadList<std::vector<uint32> >(config.GetStringDefault("AiPlayerbot.PopulateStarterZones", "1,12,14,85,141,215"), populateStarterZones);
+    LoadList<std::vector<uint32> >(config.GetStringDefault("AiPlayerbot.PopulateSanctuaryZones", "1497,1519,1537,1637,1638,1657,5180"), populateSanctuaryZones);
+    {
+        std::vector<std::string> _over;
+        LoadListString<std::vector<std::string> >(config.GetStringDefault("AiPlayerbot.PopulateDensityOverrides", "33:40,17:40,440:40,357:40,16:40,490:40"), _over);
+        populateDensityOverrides.clear();
+        for (std::string const& p : _over)
+        {
+            size_t c = p.find(':');
+            if (c == std::string::npos)
+                continue;
+            uint32 zid = (uint32)atoi(p.substr(0, c).c_str());
+            uint32 tgt = (uint32)atoi(p.substr(c + 1).c_str());
+            if (zid && tgt)
+                populateDensityOverrides[zid] = tgt;
+        }
+    }
+
+    // F2 — Overland travel parties
+    travelParties = config.GetBoolDefault("AiPlayerbot.TravelParties", false);
+    travelPartyTestMode = config.GetBoolDefault("AiPlayerbot.TravelPartyTestMode", false);
+    travelPartyDungeonSize = config.GetIntDefault("AiPlayerbot.TravelPartyDungeonSize", 5);
+
 #ifndef MANGOSBOT_ZERO
     // disable pvp near dark portal if event is active
     if (sWorldState.GetExpansion() == EXPANSION_NONE)
