@@ -657,6 +657,17 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed, bool minimal)
     if (!sPlayerbotAIConfig.randomBotAutologin || !sPlayerbotAIConfig.enabled)
         return;
 
+    // Populate-Around-Players (F1): refresh the real-player zone demand map every 30s.
+    if (sPlayerbotAIConfig.populateAroundPlayers)
+    {
+        uint32 now = (uint32)time(nullptr);
+        if (now - _playerZoneRefreshTime >= 30)
+        {
+            _playerZoneRefreshTime = now;
+            RefreshPlayerZones();
+        }
+    }
+
     if (!playersLevel)
         playersLevel = sPlayerbotAIConfig.syncLevelNoPlayer;
 
@@ -3129,10 +3140,210 @@ void RandomPlayerbotMgr::PrintTeleportCache()
     }
 }
 
+// ============================================================================
+// Populate-Around-Players (F1)
+// ============================================================================
+
+void RandomPlayerbotMgr::RefreshPlayerZones()
+{
+    _playerZones.clear();
+
+    // 1. Seed zones from online real players. Note: unlike AzerothCore, this core's own
+    // `players` member IS the bot map (see GetPlayers()) - real players are enumerated
+    // separately here, straight off world sessions, filtered by GetBotAI() == nullptr.
+    for (auto const& itr : sWorld.GetAllSessions())
+    {
+        WorldSession* session = itr.second;
+        if (!session)
+            continue;
+
+        Player* player = session->GetPlayer();
+        if (!player || !player->IsInWorld() || GetBotAI(player))
+            continue;
+
+        uint32 zoneId = player->GetZoneId();
+        ZoneDemand& d = _playerZones[zoneId];
+        d.zoneId = zoneId;
+
+        uint32 level = player->GetLevel();
+        if (player->GetTeam() == ALLIANCE)
+            d.playersAlliance++;
+        else
+            d.playersHorde++;
+
+        d.minPlayerLevel = d.minPlayerLevel ? std::min(d.minPlayerLevel, level) : level;
+        d.maxPlayerLevel = std::max(d.maxPlayerLevel, level);
+    }
+
+    if (_playerZones.empty())
+        return;
+
+    // 2. Density target + faction share per zone (territory-driven).
+    for (auto& itr : _playerZones)
+    {
+        ZoneDemand& d = itr.second;
+
+        auto ov = sPlayerbotAIConfig.populateDensityOverrides.find(d.zoneId);
+        d.target = (ov != sPlayerbotAIConfig.populateDensityOverrides.end())
+                       ? ov->second
+                       : sPlayerbotAIConfig.populateDensityDefault;
+
+        AreaTableEntry const* zone = GetAreaEntryByAreaID(d.zoneId);
+        uint32 team = zone ? zone->team : 0;  // 2 = Alliance, 4 = Horde, else contested
+        bool sanctuary = std::find(sPlayerbotAIConfig.populateSanctuaryZones.begin(),
+                                   sPlayerbotAIConfig.populateSanctuaryZones.end(), d.zoneId) !=
+                         sPlayerbotAIConfig.populateSanctuaryZones.end();
+        bool starter = std::find(sPlayerbotAIConfig.populateStarterZones.begin(),
+                                 sPlayerbotAIConfig.populateStarterZones.end(), d.zoneId) !=
+                       sPlayerbotAIConfig.populateStarterZones.end();
+
+        bool aPlayers = d.playersAlliance > 0;
+        bool hPlayers = d.playersHorde > 0;
+        float aShare;
+
+        if (sanctuary || starter)
+        {
+            // Friendly-only by owning faction; never pull the enemy here.
+            if (team == 2)
+                aShare = 1.0f;
+            else if (team == 4)
+                aShare = 0.0f;
+            else
+                aShare = (aPlayers && !hPlayers) ? 1.0f : ((hPlayers && !aPlayers) ? 0.0f : 0.5f);
+        }
+        else
+        {
+            if (aPlayers && !hPlayers)
+                aShare = sPlayerbotAIConfig.populateSoloFactionRatio;
+            else if (hPlayers && !aPlayers)
+                aShare = 1.0f - sPlayerbotAIConfig.populateSoloFactionRatio;
+            else if (aPlayers && hPlayers)
+                aShare = (float)d.playersAlliance / (float)(d.playersAlliance + d.playersHorde);
+            else
+                aShare = 0.5f;
+
+            bool enemyPresent = aPlayers && hPlayers;
+            if (!enemyPresent)
+            {
+                // Own-territory bias: mostly the owning faction + a small invader minority.
+                if (team == 2)
+                    aShare = std::max(aShare, 0.85f);
+                else if (team == 4)
+                    aShare = std::min(aShare, 0.15f);
+            }
+            else
+            {
+                // Opposing players present -> clamp toward the floor (emergent battles).
+                float f = sPlayerbotAIConfig.populateMinorityFloor;
+                aShare = std::max(f, std::min(1.0f - f, aShare));
+            }
+        }
+
+        d.allianceShare = aShare;
+        d.allowAlliance = aShare > 0.001f;
+        d.allowHorde = aShare < 0.999f;
+    }
+
+    // 3. Count current bots per zone / faction / band.
+    for (auto const& itr : GetPlayers())
+    {
+        Player* bot = itr.second;
+        if (!bot || !bot->IsInWorld())
+            continue;
+
+        auto zi = _playerZones.find(bot->GetZoneId());
+        if (zi == _playerZones.end())
+            continue;
+
+        ZoneDemand& d = zi->second;
+        if (bot->GetTeam() == ALLIANCE)
+            d.curAlliance++;
+        else
+            d.curHorde++;
+
+        if (IsPopulatePeer(d, bot->GetLevel()))
+            d.curPeer++;
+        else
+            d.curTexture++;
+    }
+}
+
+bool RandomPlayerbotMgr::IsPopulatePeer(ZoneDemand const& d, uint32 level) const
+{
+    uint32 band = sPlayerbotAIConfig.populatePeerBand;
+    uint32 lo = d.minPlayerLevel > band ? d.minPlayerLevel - band : 1;
+    uint32 hi = d.maxPlayerLevel + band;
+    return level >= lo && level <= hi;
+}
+
+std::vector<WorldLocation> RandomPlayerbotMgr::GetPlayerZoneTeleportLocations(Player* bot)
+{
+    std::vector<WorldLocation> out;
+    if (!bot || _playerZones.empty())
+        return out;
+
+    // Filter the same level-bucketed location cache normal random teleport draws from,
+    // rather than AzerothCore's sTravelMgr.GetTeleportLocations() (no equivalent here -
+    // this core's TravelMgr is destination/purpose based, not a flat teleport-point list).
+    std::vector<WorldLocation>& locs = locsPerLevelCache[bot->GetLevel()];
+    if (locs.empty())
+        return out;
+
+    Team team = bot->GetTeam();
+    uint32 level = bot->GetLevel();
+
+    for (WorldLocation& loc : locs)
+    {
+        uint32 zoneId = sTerrainMgr.GetZoneId(loc.mapId, loc.x, loc.y, loc.z);
+        auto zi = _playerZones.find(zoneId);
+        if (zi == _playerZones.end())
+            continue;
+
+        ZoneDemand const& d = zi->second;
+
+        // Faction gate.
+        if (team == ALLIANCE && !d.allowAlliance)
+            continue;
+        if (team == HORDE && !d.allowHorde)
+            continue;
+
+        float share = (team == ALLIANCE) ? d.allianceShare : (1.0f - d.allianceShare);
+        uint32 factionTarget = (uint32)(d.target * share + 0.5f);
+        uint32 factionCur = (team == ALLIANCE) ? d.curAlliance : d.curHorde;
+        if (factionCur >= factionTarget)
+            continue;
+
+        // Band gate (peer vs zone-texture).
+        uint32 peerTarget = (uint32)(d.target * sPlayerbotAIConfig.populatePeerFraction + 0.5f);
+        uint32 texTarget = d.target > peerTarget ? d.target - peerTarget : 0;
+        bool peer = IsPopulatePeer(d, level);
+        if (peer && d.curPeer >= peerTarget)
+            continue;
+        if (!peer && d.curTexture >= texTarget)
+            continue;
+
+        out.push_back(loc);
+    }
+
+    return out;
+}
+
 void RandomPlayerbotMgr::RandomTeleportForLevel(Player* bot, bool activeOnly)
 {
     if (bot->InBattleGround())
         return;
+
+    // Populate-Around-Players (F1): bias this teleport toward a real-player zone.
+    if (sPlayerbotAIConfig.populateAroundPlayers &&
+        urand(0, 100) < (uint32)(sPlayerbotAIConfig.populateProbTeleport * 100))
+    {
+        std::vector<WorldLocation> playerLocs = GetPlayerZoneTeleportLocations(bot);
+        if (!playerLocs.empty())
+        {
+            RandomTeleport(bot, playerLocs, false, activeOnly);
+            return;
+        }
+    }
 
     sLog.outDetail("Preparing location to random teleporting bot %s for level %u", bot->GetName(), bot->GetLevel());
     RandomTeleport(bot, locsPerLevelCache[bot->GetLevel()], false, activeOnly);

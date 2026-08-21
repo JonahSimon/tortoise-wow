@@ -239,6 +239,30 @@ public:
         int processTicks;
         std::unordered_map<std::string, WorldLocation> namedLocations;
         std::map<uint8, std::vector<WorldLocation> > locsPerLevelCache;
+
+        // Populate-Around-Players (F1)
+        struct ZoneDemand
+        {
+            uint32 zoneId = 0;
+            uint32 target = 0;
+            float allianceShare = 0.5f;
+            bool allowAlliance = true;
+            bool allowHorde = true;
+            uint32 playersAlliance = 0;
+            uint32 playersHorde = 0;
+            uint32 minPlayerLevel = 0;
+            uint32 maxPlayerLevel = 0;
+            uint32 curAlliance = 0;
+            uint32 curHorde = 0;
+            uint32 curPeer = 0;
+            uint32 curTexture = 0;
+        };
+        std::unordered_map<uint32, ZoneDemand> _playerZones;
+        uint32 _playerZoneRefreshTime = 0;
+        void RefreshPlayerZones();
+        bool IsPopulatePeer(ZoneDemand const& demand, uint32 level) const;
+        std::vector<WorldLocation> GetPlayerZoneTeleportLocations(Player* bot);
+
         std::map<uint32, std::vector<WorldLocation> > rpgLocsCache;
 		std::map<uint32, std::map<uint32, std::vector<WorldLocation> > > rpgLocsCacheLevel;
         std::map<uint32, std::map<uint32, std::vector<std::pair<ObjectGuid, WorldLocation>> > > innCacheLevel;
