@@ -201,8 +201,9 @@ bool ReactionEngine::Update(uint32 elapsed, bool minimal, bool isStunned, bool& 
         // Only add a reaction update delay if no reaction is pending or currently running
         if (!HasIncomingReaction() && !IsReacting())
         {
-            if (aiReactionUpdateDelay < sPlayerbotAIConfig.reactDelay)
-                aiReactionUpdateDelay = minimal ? sPlayerbotAIConfig.reactDelay * 10 : sPlayerbotAIConfig.reactDelay;
+            uint32 const reactDelay = ai->GetReactDelay();
+            if (aiReactionUpdateDelay < reactDelay)
+                aiReactionUpdateDelay = minimal ? reactDelay * 10 : reactDelay;
         }
     }
 

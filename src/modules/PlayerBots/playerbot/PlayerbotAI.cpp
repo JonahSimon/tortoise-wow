@@ -2940,6 +2940,35 @@ std::set<uint32> PlayerbotAI::GetAllCurrentQuestIds()
     return result;
 }
 
+// F1 (PopulateSoftenEnemyPvp): a bot fighting a real human in the open world reacts slower,
+// so it plays like an average player instead of a frame-perfect BiS bot. Structured PvP
+// (battleground/arena) and bots serving a real master are unaffected.
+bool PlayerbotAI::IsSoftenedWorldPvp()
+{
+    if (HasRealPlayerMaster())
+        return false;
+
+    if (bot->InBattleGround() || bot->InArena())
+        return false;
+
+    Unit* victim = bot->GetVictim();
+    if (!victim || !victim->IsPlayer())
+        return false;
+
+    PlayerbotAI* victimAI = GetBotAI(victim->ToPlayer());
+    return !victimAI || victimAI->IsRealPlayer();  // the victim is a real human
+}
+
+uint32 PlayerbotAI::GetReactDelay()
+{
+    uint32 base = sPlayerbotAIConfig.reactDelay;
+
+    if (sPlayerbotAIConfig.populateSoftenEnemyPvp && IsSoftenedWorldPvp())
+        base = (uint32)(base * sPlayerbotAIConfig.populateSoftenReactMult);
+
+    return base;
+}
+
 std::set<uint32> PlayerbotAI::GetCurrentIncompleteQuestIds()
 {
     std::set<uint32> result;

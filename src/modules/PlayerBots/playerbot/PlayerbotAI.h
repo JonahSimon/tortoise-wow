@@ -635,7 +635,11 @@ public:
     }
     bool IsSelfMaster() { return master ? (master == bot) : false; }
     //Bot has a master that is a player.
-    bool HasRealPlayerMaster() { return master && (!GetBotAI(master) || GetBotAI(master)->IsRealPlayer()); } 
+    bool HasRealPlayerMaster() { return master && (!GetBotAI(master) || GetBotAI(master)->IsRealPlayer()); }
+    // F1 (PopulateSoftenEnemyPvp): true while this bot is fighting a real human in the open
+    // world, where it should react like an average player rather than frame-perfectly.
+    bool IsSoftenedWorldPvp();
+    uint32 GetReactDelay() override; 
     //Bot has a master that is actively playing.
     bool HasActivePlayerMaster() const { return master && !GetBotAI(master); }
     //Checks if the bot is summoned as alt of a player

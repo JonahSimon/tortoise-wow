@@ -18,6 +18,10 @@ public:
     
     uint32 GetAIInternalUpdateDelay() const { return aiInternalUpdateDelay; }
 
+    // How long the bot waits between AI passes, i.e. how fast it reacts. Virtual so
+    // PlayerbotAI can slow it down while fighting a real player (PopulateSoftenEnemyPvp).
+    virtual uint32 GetReactDelay();
+
 protected:
     virtual void UpdateAIInternal(uint32 elapsed, bool minimal = false);
     bool CanUpdateAIInternal() const { return aiInternalUpdateDelay < 100U; }
