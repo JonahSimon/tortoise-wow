@@ -2560,6 +2560,14 @@ void RandomPlayerbotMgr::Revive(Player* player)
     }
 }
 
+// Zones RandomTeleport refuses outright, regardless of bot or level: Turtle's two custom
+// player-only starting zones, which ship no MMAP data. F1 checks the same list so it never
+// builds demand for a zone whose every candidate is guaranteed to be filtered out below.
+static bool IsTeleportVetoedZone(uint32 zoneId)
+{
+    return zoneId == 5536 || zoneId == 5225;
+}
+
 void RandomPlayerbotMgr::RandomTeleport(Player* bot, std::vector<WorldLocation> &locs, bool hearth, bool activeOnly)
 {
     if (bot->IsBeingTeleported())
@@ -2748,7 +2756,7 @@ void RandomPlayerbotMgr::RandomTeleport(Player* bot, std::vector<WorldLocation> 
         }
 
         // Never send bots to custom player-only starting zones (no MMAP support)
-        if (zoneId == 5536 || zoneId == 5225)
+        if (IsTeleportVetoedZone(zoneId))
             return true;
 
         if (!area)
@@ -3201,6 +3209,17 @@ void RandomPlayerbotMgr::RefreshPlayerZones()
             continue;
 
         uint32 zoneId = player->GetZoneId();
+
+        // RandomTeleport vetoes these outright, so every biased candidate would be filtered
+        // out downstream and the bot would not move at all - worse than stock behaviour.
+        // Skipping the zone here means the roll falls through to a normal teleport instead.
+        if (IsTeleportVetoedZone(zoneId))
+        {
+            F1Log("REFRESH: zone " + std::to_string(zoneId) +
+                  " is teleport-vetoed (no MMAP data), skipping demand for it");
+            continue;
+        }
+
         ZoneDemand& d = _playerZones[zoneId];
         d.zoneId = zoneId;
 
@@ -3881,12 +3900,30 @@ void RandomPlayerbotMgr::RandomTeleportForLevel(Player* bot, bool activeOnly)
         std::vector<WorldLocation> playerLocs = GetPlayerZoneTeleportLocations(bot);
         if (!playerLocs.empty())
         {
+            uint32 const fromZone = bot->GetZoneId();
+            float const fromX = bot->GetPositionX(), fromY = bot->GetPositionY();
+
+            RandomTeleport(bot, playerLocs, false, activeOnly);
+
+            // Log after the call, not before: RandomTeleport re-filters the list and can drop
+            // every candidate, in which case the bot does not move at all. "Proposed" and
+            // "arrived" are different events and the old line only ever reported the first.
+            // A cross-map teleport is still pending here (GetZoneId lags), so read
+            // IsBeingTeleported and the position, not the zone, to decide whether it took.
+            bool const moved = bot->IsBeingTeleported() ||
+                               bot->GetPositionX() != fromX || bot->GetPositionY() != fromY;
+
             std::ostringstream o;
             o << "BIASED TELEPORT " << bot->GetName() << " lvl " << (uint32)bot->GetLevel()
-              << " from zone " << bot->GetZoneId() << " -> " << playerLocs.size()
-              << " player-zone candidates";
+              << " from zone " << fromZone << " -> " << playerLocs.size()
+              << " player-zone candidates -> ";
+            if (!moved)
+                o << "NO MOVE (every candidate vetoed downstream)";
+            else if (bot->IsBeingTeleported())
+                o << "teleport pending (cross-map)";
+            else
+                o << "zone " << bot->GetZoneId();
             F1Log(o.str());
-            RandomTeleport(bot, playerLocs, false, activeOnly);
             return;
         }
 

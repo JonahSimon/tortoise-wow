@@ -244,8 +244,8 @@ bool PlayerbotAIConfig::Initialize()
     populateMinorityFloor = config.GetFloatDefault("AiPlayerbot.PopulateMinorityFloor", 0.35f);
     populateSoftenEnemyPvp = config.GetBoolDefault("AiPlayerbot.PopulateSoftenEnemyPvp", true);
     populateSoftenReactMult = config.GetFloatDefault("AiPlayerbot.PopulateSoftenReactMult", 2.0f);
-    LoadList<std::vector<uint32> >(config.GetStringDefault("AiPlayerbot.PopulateStarterZones", "1,12,14,85,141,215"), populateStarterZones);
-    LoadList<std::vector<uint32> >(config.GetStringDefault("AiPlayerbot.PopulateSanctuaryZones", "1497,1519,1537,1637,1638,1657,5180"), populateSanctuaryZones);
+    LoadList<std::vector<uint32> >(config.GetStringDefault("AiPlayerbot.PopulateStarterZones", "1,12,14,85,141,215,5225,5536"), populateStarterZones);
+    LoadList<std::vector<uint32> >(config.GetStringDefault("AiPlayerbot.PopulateSanctuaryZones", "1497,1519,1537,1637,1638,1657,2040,5180"), populateSanctuaryZones);
     {
         std::vector<std::string> _over;
         LoadListString<std::vector<std::string> >(config.GetStringDefault("AiPlayerbot.PopulateDensityOverrides", "33:40,17:40,440:40,357:40,16:40,490:40"), _over);
@@ -270,7 +270,7 @@ bool PlayerbotAIConfig::Initialize()
     // ravine (the WC portal itself sits at -731,-2218,17 per game_tele/areatrigger_teleport,
     // deep inside the cave; the party stops at the outdoor mouth).
     travelPartyMuster = config.GetStringDefault("AiPlayerbot.TravelPartyMuster", "1,1493.35,-4414.17,23.0");
-    travelPartyDest = config.GetStringDefault("AiPlayerbot.TravelPartyDest", "1,-844.0,-2037.0,80.5");
+    travelPartyDest = config.GetStringDefault("AiPlayerbot.TravelPartyDest", "1,-753.60,-2212.78,21.54");
     travelPartyMinLevel = 10;
     travelPartyMaxLevel = 30;
     {
