@@ -4284,7 +4284,9 @@ bool RandomPlayerbotMgr::HandlePlayerbotConsoleCommand(ChatHandler* handler, cha
     // SEC_PLAYER in Chat.cpp - the generic handler tables below get no security context.
     if (cmd.find("travelparty") == 0)
     {
-        if (handler->GetAccessLevel() < SEC_ADMINISTRATOR)
+        // No session = console/RA, which is already privileged. ChatHandler::GetAccessLevel()
+        // is protected, so read the security level off the session directly.
+        if (handler->GetSession() && handler->GetSession()->GetSecurity() < SEC_ADMINISTRATOR)
         {
             handler->SendSysMessage("You do not have permission to use this command.");
             return true;
