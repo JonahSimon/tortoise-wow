@@ -32,6 +32,7 @@
 #include "Group/Group.h"
 
 #include <fstream>
+#include <cmath>
 
 #ifndef MANGOSBOT_ZERO
 #ifdef CMANGOS
@@ -3169,6 +3170,18 @@ void RandomPlayerbotMgr::PrintTeleportCache()
 // Populate-Around-Players (F1)
 // ============================================================================
 
+// Telemetry to a plain file in the server's working directory, same instrument as F2Log.
+// The demand map is invisible from outside the process - without this, a botless or
+// player-present run looks identical from the DB, and "F1 did nothing" is indistinguishable
+// from "F1 never ran".
+// ponytail: debug instrument for the Phase 6 density validation; drop it once F1 is proven.
+static void F1Log(std::string const& line)
+{
+    std::ofstream f("F1_populate.log", std::ios::app);
+    if (f)
+        f << "[" << (uint32)time(nullptr) << "] " << line << "\n";
+}
+
 void RandomPlayerbotMgr::RefreshPlayerZones()
 {
     _playerZones.clear();
@@ -3202,7 +3215,10 @@ void RandomPlayerbotMgr::RefreshPlayerZones()
     }
 
     if (_playerZones.empty())
+    {
+        F1Log("REFRESH: no real players in world (every F1 path falls back to stock)");
         return;
+    }
 
     // 2. Density target + faction share per zone (territory-driven).
     for (auto& itr : _playerZones)
@@ -3296,6 +3312,18 @@ void RandomPlayerbotMgr::RefreshPlayerZones()
         else
             d.curTexture++;
     }
+
+    for (auto const& itr : _playerZones)
+    {
+        ZoneDemand const& d = itr.second;
+        std::ostringstream o;
+        o << "REFRESH zone " << d.zoneId << ": players A" << d.playersAlliance << "/H"
+          << d.playersHorde << " lvl " << d.minPlayerLevel << "-" << d.maxPlayerLevel
+          << "; target " << d.target << " aShare " << d.allianceShare << " (allowA "
+          << d.allowAlliance << " allowH " << d.allowHorde << "); bots A" << d.curAlliance
+          << "/H" << d.curHorde << " peer " << d.curPeer << " tex " << d.curTexture;
+        F1Log(o.str());
+    }
 }
 
 bool RandomPlayerbotMgr::IsPopulatePeer(ZoneDemand const& d, uint32 level) const
@@ -3317,7 +3345,16 @@ std::vector<WorldLocation> RandomPlayerbotMgr::GetPlayerZoneTeleportLocations(Pl
     // this core's TravelMgr is destination/purpose based, not a flat teleport-point list).
     std::vector<WorldLocation>& locs = locsPerLevelCache[bot->GetLevel()];
     if (locs.empty())
+    {
+        std::ostringstream o;
+        o << "CANDIDATES " << bot->GetName() << " lvl " << (uint32)bot->GetLevel()
+          << ": 0 - the level-" << (uint32)bot->GetLevel() << " location cache is empty";
+        F1Log(o.str());
         return out;
+    }
+
+    // Reject reasons, so an empty result says WHY instead of just "0".
+    uint32 rejZone = 0, rejFactionGate = 0, rejFactionFull = 0, rejBandFull = 0;
 
     Team team = bot->GetTeam();
     uint32 level = bot->GetLevel();
@@ -3327,33 +3364,58 @@ std::vector<WorldLocation> RandomPlayerbotMgr::GetPlayerZoneTeleportLocations(Pl
         uint32 zoneId = sTerrainMgr.GetZoneId(loc.mapId, loc.x, loc.y, loc.z);
         auto zi = _playerZones.find(zoneId);
         if (zi == _playerZones.end())
+        {
+            rejZone++;
             continue;
+        }
 
         ZoneDemand const& d = zi->second;
 
         // Faction gate.
         if (team == ALLIANCE && !d.allowAlliance)
+        {
+            rejFactionGate++;
             continue;
+        }
         if (team == HORDE && !d.allowHorde)
+        {
+            rejFactionGate++;
             continue;
+        }
 
         float share = (team == ALLIANCE) ? d.allianceShare : (1.0f - d.allianceShare);
         uint32 factionTarget = (uint32)(d.target * share + 0.5f);
         uint32 factionCur = (team == ALLIANCE) ? d.curAlliance : d.curHorde;
         if (factionCur >= factionTarget)
+        {
+            rejFactionFull++;
             continue;
+        }
 
         // Band gate (peer vs zone-texture).
         uint32 peerTarget = (uint32)(d.target * sPlayerbotAIConfig.populatePeerFraction + 0.5f);
         uint32 texTarget = d.target > peerTarget ? d.target - peerTarget : 0;
         bool peer = IsPopulatePeer(d, level);
         if (peer && d.curPeer >= peerTarget)
+        {
+            rejBandFull++;
             continue;
+        }
         if (!peer && d.curTexture >= texTarget)
+        {
+            rejBandFull++;
             continue;
+        }
 
         out.push_back(loc);
     }
+
+    std::ostringstream o;
+    o << "CANDIDATES " << bot->GetName() << " lvl " << level << " "
+      << (team == ALLIANCE ? "A" : "H") << ": " << out.size() << " of " << locs.size()
+      << " (rejected: wrong zone " << rejZone << ", faction gate " << rejFactionGate
+      << ", faction full " << rejFactionFull << ", band full " << rejBandFull << ")";
+    F1Log(o.str());
 
     return out;
 }
@@ -3522,7 +3584,12 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
     // strategies instead; one less pair of owned pointers to leak on disband.
     leaderAI->ChangeStrategy("-travel,-grind,-rpg", BotState::BOT_STATE_NON_COMBAT);
 
-    party.deadline = (uint32)time(nullptr) + 900;    // 15 min hard timeout
+    // Distance-proportional hard timeout. The flat 900 s was already tight: the 3300 yd
+    // Org->Wailing Caverns route took ~10 min *with a mount*. The stall detector below is the
+    // real guard against a wedged march, so this only has to be generous enough not to cut off
+    // a legitimate one. 5 min of slack + 2 s per yard (~0.5 yd/s, half of unmounted running).
+    float const routeDist = std::hypot(dest.x - muster.x, dest.y - muster.y);
+    party.deadline = (uint32)time(nullptr) + 300 + (uint32)(routeDist * 2.0f);
     party.bestProgressTime = (uint32)time(nullptr);  // start the no-progress clock now
     _travelParties.push_back(std::move(party));
 
@@ -3814,9 +3881,16 @@ void RandomPlayerbotMgr::RandomTeleportForLevel(Player* bot, bool activeOnly)
         std::vector<WorldLocation> playerLocs = GetPlayerZoneTeleportLocations(bot);
         if (!playerLocs.empty())
         {
+            std::ostringstream o;
+            o << "BIASED TELEPORT " << bot->GetName() << " lvl " << (uint32)bot->GetLevel()
+              << " from zone " << bot->GetZoneId() << " -> " << playerLocs.size()
+              << " player-zone candidates";
+            F1Log(o.str());
             RandomTeleport(bot, playerLocs, false, activeOnly);
             return;
         }
+
+        F1Log(std::string("FALLBACK ") + bot->GetName() + " - no player-zone candidates, stock teleport");
     }
 
     sLog.outDetail("Preparing location to random teleporting bot %s for level %u", bot->GetName(), bot->GetLevel());
