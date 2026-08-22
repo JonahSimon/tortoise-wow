@@ -3173,9 +3173,10 @@ void RandomPlayerbotMgr::RefreshPlayerZones()
 {
     _playerZones.clear();
 
-    // 1. Seed zones from online real players. Note: unlike AzerothCore, this core's own
-    // `players` member IS the bot map (see GetPlayers()) - real players are enumerated
-    // separately here, straight off world sessions, filtered by GetBotAI() == nullptr.
+    // 1. Seed zones from online real players, straight off world sessions, filtered by
+    // GetBotAI() == nullptr. (This core's `players` member is a MIXED map - real players plus
+    // non-random bots, see OnPlayerLogin - so it can't be used as-is either way. The random
+    // bots live in `GetAllBots()`, used further down.)
     for (auto const& itr : sWorld.GetAllSessions())
     {
         WorldSession* session = itr.second;
@@ -3270,7 +3271,11 @@ void RandomPlayerbotMgr::RefreshPlayerZones()
     }
 
     // 3. Count current bots per zone / faction / band.
-    for (auto const& itr : GetPlayers())
+    // `GetAllBots()` (PlayerbotHolder::playerBots), NOT `GetPlayers()`: this core's `players`
+    // member only collects bots that are NOT random bots (see OnPlayerLogin, "Including non-random
+    // bot player ... into random bot update"), so counting through it silently found zero bots in
+    // every zone. Same spelling as AzerothCore's, contrary to the Phase 0 mapping note.
+    for (auto const& itr : GetAllBots())
     {
         Player* bot = itr.second;
         if (!bot || !bot->IsInWorld())
@@ -3428,7 +3433,7 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
     // Bots are teleported to the muster point wherever they were, so the party always starts
     // together at the city.
     std::vector<Player*> picked;
-    for (auto const& itr : GetPlayers())
+    for (auto const& itr : GetAllBots())
     {
         if (picked.size() >= want)
             break;
