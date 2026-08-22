@@ -270,7 +270,7 @@ bool PlayerbotAIConfig::Initialize()
     // ravine (the WC portal itself sits at -731,-2218,17 per game_tele/areatrigger_teleport,
     // deep inside the cave; the party stops at the outdoor mouth).
     travelPartyMuster = config.GetStringDefault("AiPlayerbot.TravelPartyMuster", "1,1493.35,-4414.17,23.0");
-    travelPartyDest = config.GetStringDefault("AiPlayerbot.TravelPartyDest", "1,-753.60,-2212.78,21.54");
+    travelPartyDest = config.GetStringDefault("AiPlayerbot.TravelPartyDest", "1,-844.0,-2037.0,80.5");
     travelPartyMinLevel = 10;
     travelPartyMaxLevel = 30;
     {

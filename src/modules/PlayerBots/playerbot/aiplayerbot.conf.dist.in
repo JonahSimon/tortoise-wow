@@ -5092,18 +5092,25 @@ AiPlayerbot.TravelParties = 0
 AiPlayerbot.TravelPartyTestMode = 0
 AiPlayerbot.TravelPartyDungeonSize = 5
 # Muster point and destination, "map,x,y,z". Defaults march Horde bots from the
-# Orgrimmar gate to the Wailing Caverns entrance. The muster comes from Turtle's
-# own game_tele table (`orgrimmarentrance`). The destination is the centre of
-# areatrigger 228 "Wailing Caverns - Entrance" read out of Turtle's own
-# AreaTrigger.dbc (2026-08-22) - that is the outdoor door itself, 13 yd radius.
-# It replaces the inherited AzerothCore guess of -844,-2037,80.5, which sat ~200
-# yd away and ~59 yd up, i.e. on the ravine rim rather than at the mouth, and was
-# the reason parties "arrived" without ever reaching the entrance.
-# Every other classic + Turtle-custom entrance is tabulated in the KB, extracted
-# by tools/dungeon_entrances.py the same way.
+# Orgrimmar gate to the outdoor Wailing Caverns cave mouth. The muster comes from
+# Turtle's own game_tele table (`orgrimmarentrance`).
+#
+# The destination is NOT the door. Areatrigger 228 "Wailing Caverns - Entrance"
+# is at 1,-753.60,-2212.78,21.54 (AreaTrigger.dbc, radius 13) and that really is
+# the door, but AzerothCore tested pathing to it on 2026-07-21 and the cave
+# tunnel is not on the continent navmesh there: the leader climbs the surface
+# hill ABOVE the portal (Z 80 -> 130) and the nearest reachable poly stays ~90 yd
+# short. The value below is the mesh-reachable mouth that test settled on, and
+# Turtle has walked to it end to end with an ARRIVED. Retrying the door itself is
+# a config edit and a restart - worth doing once, since Turtle's mmaps are its
+# own, but do not assume it works.
+#
+# General rule for cave and ravine dungeons: the DBC door is the trigger, not the
+# approach point. Every entrance on both cores is tabulated in the KB.
+#
 # The party's faction is taken from the muster point's zone territory, so pointing
 # these at an Alliance city recruits Alliance bots with no code change.
 AiPlayerbot.TravelPartyMuster = "1,1493.35,-4414.17,23.0"
-AiPlayerbot.TravelPartyDest = "1,-753.60,-2212.78,21.54"
+AiPlayerbot.TravelPartyDest = "1,-844.0,-2037.0,80.5"
 # Which bots are eligible, "min,max" character level. Match this to the dungeon.
 AiPlayerbot.TravelPartyLevels = "10,30"
