@@ -3598,12 +3598,18 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                 // log instead of orbiting until the 15 min timeout.
                 // ponytail: no ring-probe descent machinery - that was tuned against one
                 // dungeon on the 3.3.5 mesh. Re-add only if a real route here needs it.
-                if (leader->GetDistance2dToCenter(p.destX, p.destY) <= 120.f &&
-                    (now - p.bestProgressTime) >= 45)
+                bool const nearDest = leader->GetDistance2dToCenter(p.destX, p.destY) <= 120.f;
+                // 45 s near the door, 90 s out on the road: a legitimate detour around a mountain
+                // can spend a while not getting any closer in a straight line.
+                if (now - p.bestProgressTime >= (nearDest ? 45u : 90u))
                 {
                     std::ostringstream o;
-                    o << "STALLED near destination (best " << (int)p.bestDist << " yd) -> disband close-enough";
+                    o << "STALLED " << (nearDest ? "near destination" : "en route") << " (best "
+                      << (int)p.bestDist << " yd, now " << (int)destDist << " yd) -> disband";
                     F2Log(o.str());
+                    // Near the destination this is "close enough, the navmesh has no route the rest
+                    // of the way". Anywhere else it means the march is wedged and would otherwise
+                    // burn the whole 15 min deadline in silence, which is not a useful test result.
                     done = true;
                 }
 
@@ -3675,6 +3681,21 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                             return false;
 
                         Vector3 const& end = g.getPath().back();
+
+                        // A real path that goes nowhere is worse than no path: PATHFIND_INCOMPLETE
+                        // against a target thousands of yards out can come back ending a few yards
+                        // ahead, and the leader then walks to it, re-paths, gets the same stub, and
+                        // thrashes in place. (Watched exactly that in Durotar 2026-08-21: stuck at
+                        // ~2540 yd out, re-pathing every 2-3 s.) Require the endpoint to be a real
+                        // step forward, else fall through to the fan probes below, which aim at
+                        // intermediate points and route around whatever is blocking us.
+                        float const stepLen = leader->GetDistance3dToCenter(end.x, end.y, end.z);
+                        float const endToDest = std::sqrt((end.x - p.destX) * (end.x - p.destX) +
+                                                          (end.y - p.destY) * (end.y - p.destY) +
+                                                          (end.z - p.destZ) * (end.z - p.destZ));
+                        if (stepLen < 25.f || endToDest > destDist - 15.f)
+                            return false;
+
                         endX = end.x;
                         endY = end.y;
                         endZ = end.z;
