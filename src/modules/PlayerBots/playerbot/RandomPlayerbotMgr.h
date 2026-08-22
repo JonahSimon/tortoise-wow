@@ -82,6 +82,9 @@ public:
         bool GetNamedLocation(std::string const& name, WorldLocation& location);
 
         static bool HandlePlayerbotConsoleCommand(ChatHandler* handler, char const* args);
+        // F2 - Overland travel parties: bots muster at a city and march to a dungeon entrance.
+        std::string SpawnTravelParty();  // returns the leader's name, "" on failure
+        bool IsInTravelParty(Player* bot);  // public: PlayerbotAI keeps marching bots active
         bool IsRandomBot(Player* bot);
         bool IsRandomBot(uint32 bot);
         bool IsFreeBot(Player* bot) { return IsRandomBot(bot) || sPlayerbotAIConfig.IsFreeAltBot(bot); }
@@ -262,6 +265,28 @@ public:
         void RefreshPlayerZones();
         bool IsPopulatePeer(ZoneDemand const& demand, uint32 level) const;
         std::vector<WorldLocation> GetPlayerZoneTeleportLocations(Player* bot);
+
+        // F2 - Overland travel parties
+        struct TravelParty
+        {
+            ObjectGuid leaderGuid;
+            std::vector<ObjectGuid> memberGuids;  // includes the leader
+            uint32 mapId = 0;
+            float destX = 0.f, destY = 0.f, destZ = 0.f;
+            uint32 deadline = 0;        // unix time; hard anti-stuck timeout
+            uint32 lastLogTime = 0;     // telemetry throttle
+            float maxMemberDist = 0.f;  // farthest follower from the leader
+            // Aim the leader at the FAR end of its navmesh path so the core walks it as one
+            // long spline; re-issuing MovePoint every tick restarts the spline and looks choppy.
+            float curTgtX = 0.f, curTgtY = 0.f, curTgtZ = 0.f;
+            bool curTgtSet = false;
+            float bestDist = 1e9f;        // closest 3D approach to the destination so far
+            uint32 bestProgressTime = 0;  // last time bestDist improved (anti-circling)
+        };
+        std::vector<TravelParty> _travelParties;
+        uint32 _travelPartyTime = 0;
+        void UpdateTravelParties();               // per tick: march, arrive, time out
+        void DisbandTravelParty(TravelParty& p);  // tear down group + restore bot AI
 
         std::map<uint32, std::vector<WorldLocation> > rpgLocsCache;
 		std::map<uint32, std::map<uint32, std::vector<WorldLocation> > > rpgLocsCacheLevel;

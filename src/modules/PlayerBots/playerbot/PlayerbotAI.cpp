@@ -6091,6 +6091,11 @@ ActivePiorityType PlayerbotAI::GetPriorityType()
     if (IsRealPlayer())
         return ActivePiorityType::IS_REAL_PLAYER;
 
+    // F2: a bot marching in an overland travel party is grouped only with other bots, so
+    // nothing else here would keep it active - and an inactive bot does not walk.
+    if (sPlayerbotAIConfig.travelParties && sRandomPlayerbotMgr.IsInTravelParty(bot))
+        return ActivePiorityType::IS_ALWAYS_ACTIVE;
+
     Group* group = bot->GetGroup();
     if (group)
     {

@@ -5082,8 +5082,18 @@ AiPlayerbot.PopulateSoftenReactMult = 2.0
 #    Bots muster at a city and march on foot to a dungeon entrance,
 #    then disband (no enter/clear). Route/coords still need re-authoring
 #    for this map before this is usable - see the port plan.
-#    GM command (GM level 3): .playerbots travelparty
+#    GM command (SEC_ADMINISTRATOR): .rndbot travelparty
 # =====================================================================
 AiPlayerbot.TravelParties = 0
 AiPlayerbot.TravelPartyTestMode = 0
 AiPlayerbot.TravelPartyDungeonSize = 5
+# Muster point and destination, "map,x,y,z". Defaults march Horde bots from the
+# Orgrimmar gate to the Wailing Caverns entrance. Both come from Turtle's own
+# game_tele table (`orgrimmarentrance`, and the WC portal at -731,-2218,17 whose
+# outdoor cave mouth is the value below) - the mouth still wants an in-game check.
+# The party's faction is taken from the muster point's zone territory, so pointing
+# these at an Alliance city recruits Alliance bots with no code change.
+AiPlayerbot.TravelPartyMuster = "1,1493.35,-4414.17,23.0"
+AiPlayerbot.TravelPartyDest = "1,-844.0,-2037.0,80.5"
+# Which bots are eligible, "min,max" character level. Match this to the dungeon.
+AiPlayerbot.TravelPartyLevels = "10,30"

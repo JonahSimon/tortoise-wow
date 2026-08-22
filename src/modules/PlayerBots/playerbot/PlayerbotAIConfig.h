@@ -147,6 +147,12 @@ public:
     bool travelParties;
     bool travelPartyTestMode;
     uint32 travelPartyDungeonSize;
+    // "map,x,y,z" strings: where the party musters and where it marches to. Config, not
+    // constants, because both need tuning against this map in-game and a rebuild is ~20 min.
+    std::string travelPartyMuster;
+    std::string travelPartyDest;
+    uint32 travelPartyMinLevel;
+    uint32 travelPartyMaxLevel;
     std::list<uint32> randomBotQuestItems;
     std::list<uint32> randomBotAccounts;
     std::unordered_set<uint32> nonRandomBotAccounts;

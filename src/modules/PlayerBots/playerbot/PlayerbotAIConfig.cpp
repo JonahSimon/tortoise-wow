@@ -266,6 +266,22 @@ bool PlayerbotAIConfig::Initialize()
     travelParties = config.GetBoolDefault("AiPlayerbot.TravelParties", false);
     travelPartyTestMode = config.GetBoolDefault("AiPlayerbot.TravelPartyTestMode", false);
     travelPartyDungeonSize = config.GetIntDefault("AiPlayerbot.TravelPartyDungeonSize", 5);
+    // Defaults are Turtle's own game_tele rows: `orgrimmarentrance` -> the Wailing Caverns
+    // ravine (the WC portal itself sits at -731,-2218,17 per game_tele/areatrigger_teleport,
+    // deep inside the cave; the party stops at the outdoor mouth).
+    travelPartyMuster = config.GetStringDefault("AiPlayerbot.TravelPartyMuster", "1,1493.35,-4414.17,23.0");
+    travelPartyDest = config.GetStringDefault("AiPlayerbot.TravelPartyDest", "1,-844.0,-2037.0,80.5");
+    travelPartyMinLevel = 10;
+    travelPartyMaxLevel = 30;
+    {
+        std::string levels = config.GetStringDefault("AiPlayerbot.TravelPartyLevels", "10,30");
+        uint32 lo = 0, hi = 0;
+        if (sscanf(levels.c_str(), "%u,%u", &lo, &hi) == 2 && lo && hi >= lo)
+        {
+            travelPartyMinLevel = lo;
+            travelPartyMaxLevel = hi;
+        }
+    }
 
 #ifndef MANGOSBOT_ZERO
     // disable pvp near dark portal if event is active
