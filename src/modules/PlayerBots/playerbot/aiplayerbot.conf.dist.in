@@ -5062,6 +5062,15 @@ AiPlayerbot.PopulateDensityDefault = 25
 AiPlayerbot.PopulateDensityOverrides = "33:40,17:40,440:40,357:40,16:40,490:40"
 AiPlayerbot.PopulatePeerBand = 7
 AiPlayerbot.PopulatePeerFraction = 0.7
+# The peer band can only be filled from the bot's OWN level bucket of the teleport-location
+# cache, and usually that bucket holds no point in the zone the player is standing in. Measured
+# live 2026-08-22: a level 1 player in Stormwind and in Stranglethorn read "peer 0" on every
+# single refresh, so only the 30% texture share filled and every bot delivered was max level.
+# Setting this to 1 lets a peer that found nothing in its own bucket draw from all the other
+# buckets, still filtered to the player's zone and still through the faction and density gates.
+# The points are real cached teleport locations, so they are ground-snapped and mesh-valid.
+# Off by default because it deliberately sends under-levelled bots into over-levelled zones.
+AiPlayerbot.PopulatePeerAnyLevelPoints = 0
 AiPlayerbot.PopulateSoloFactionRatio = 0.7
 AiPlayerbot.PopulateMinorityFloor = 0.35
 # Zone IDs, ported from the AzerothCore source and checked against Turtle's

@@ -136,6 +136,7 @@ public:
     uint32 populateDensityDefault;
     uint32 populatePeerBand;
     float populatePeerFraction;
+    bool populatePeerAnyLevelPoints;
     float populateSoloFactionRatio;
     float populateMinorityFloor;
     std::map<uint32, uint32> populateDensityOverrides;

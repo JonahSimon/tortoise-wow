@@ -240,6 +240,7 @@ bool PlayerbotAIConfig::Initialize()
     populateDensityDefault = config.GetIntDefault("AiPlayerbot.PopulateDensityDefault", 25);
     populatePeerBand = config.GetIntDefault("AiPlayerbot.PopulatePeerBand", 7);
     populatePeerFraction = config.GetFloatDefault("AiPlayerbot.PopulatePeerFraction", 0.7f);
+    populatePeerAnyLevelPoints = config.GetBoolDefault("AiPlayerbot.PopulatePeerAnyLevelPoints", false);
     populateSoloFactionRatio = config.GetFloatDefault("AiPlayerbot.PopulateSoloFactionRatio", 0.7f);
     populateMinorityFloor = config.GetFloatDefault("AiPlayerbot.PopulateMinorityFloor", 0.35f);
     populateSoftenEnemyPvp = config.GetBoolDefault("AiPlayerbot.PopulateSoftenEnemyPvp", true);

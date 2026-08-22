@@ -3378,8 +3378,23 @@ std::vector<WorldLocation> RandomPlayerbotMgr::GetPlayerZoneTeleportLocations(Pl
     Team team = bot->GetTeam();
     uint32 level = bot->GetLevel();
 
-    for (WorldLocation& loc : locs)
+    // The peer band is only fillable where THIS bot's level bucket happens to hold points in the
+    // demanded zone, and usually it does not: a level 1-8 bot has no cached point anywhere in
+    // Stranglethorn, so a level 1 player parked there reads `peer 0` on every refresh and gets
+    // only the 30% texture share, which is by construction the wrong level to play with. Measured
+    // live 2026-08-22 in Stormwind and Stranglethorn: peer 0 in every single refresh of the run.
+    //
+    // PopulatePeerAnyLevelPoints lets a peer that found nothing in its own bucket draw from every
+    // other bucket instead, still filtered to the demanded zone and still through every gate
+    // below. The points are real cached teleport locations, so they are ground-snapped and
+    // mesh-valid - the only thing being relaxed is which level bucket they were filed under.
+    // Default off: it deliberately sends under-levelled bots into zones above their level.
+    auto collect = [&](std::vector<WorldLocation>& src, uint32 cap) -> void
     {
+    for (WorldLocation& loc : src)
+    {
+        if (cap && out.size() >= cap)
+            return;
         uint32 zoneId = sTerrainMgr.GetZoneId(loc.mapId, loc.x, loc.y, loc.z);
         auto zi = _playerZones.find(zoneId);
         if (zi == _playerZones.end())
@@ -3428,12 +3443,47 @@ std::vector<WorldLocation> RandomPlayerbotMgr::GetPlayerZoneTeleportLocations(Pl
 
         out.push_back(loc);
     }
+    };
+
+    collect(locs, 0);
+
+    size_t const ownBucket = out.size();
+    bool widened = false;
+
+    if (out.empty() && sPlayerbotAIConfig.populatePeerAnyLevelPoints && rejZone && !rejFactionGate)
+    {
+        // Only widen for a bot that is a peer of some zone actually demanding bots, and only when
+        // "wrong zone" is what emptied the list - a faction or density rejection is the system
+        // working, and widening would just find more points it has to reject.
+        bool anyPeerDemand = false;
+        for (auto const& itr : _playerZones)
+            if (IsPopulatePeer(itr.second, level))
+                anyPeerDemand = true;
+
+        if (anyPeerDemand)
+        {
+            widened = true;
+            // Capped: the full cache is ~60 buckets of thousands of points each and this runs on
+            // the bot update thread. 200 candidates is far more than a single random pick needs.
+            for (auto& kv : locsPerLevelCache)
+            {
+                if (kv.first == bot->GetLevel())
+                    continue;
+                collect(kv.second, 200);
+                if (out.size() >= 200)
+                    break;
+            }
+        }
+    }
 
     std::ostringstream o;
     o << "CANDIDATES " << bot->GetName() << " lvl " << level << " "
       << (team == ALLIANCE ? "A" : "H") << ": " << out.size() << " of " << locs.size()
       << " (rejected: wrong zone " << rejZone << ", faction gate " << rejFactionGate
       << ", faction full " << rejFactionFull << ", band full " << rejBandFull << ")";
+    if (widened)
+        o << " [peer widened: " << ownBucket << " in own bucket -> " << out.size()
+          << " across all buckets]";
     F1Log(o.str());
 
     return out;
