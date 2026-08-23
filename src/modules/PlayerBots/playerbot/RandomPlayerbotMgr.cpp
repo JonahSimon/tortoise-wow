@@ -3970,7 +3970,19 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                             g.getPath().size() <= 1)
                             return false;
 
-                        Vector3 const& end = g.getPath().back();
+                        // Walk to a point we can actually reach this hop, not to the far end of
+                        // the path. An endpoint 900 yd out is both unreachable in one spline and
+                        // wildly unstable between ticks (it is whichever poly is closest-reachable
+                        // right now), which is what made the leader ping-pong. Take the furthest
+                        // path node within MAX_HOP instead; the next re-path continues from there
+                        // with fresh information. ponytail: fixed 200 yd, not tuned per terrain.
+                        float const MAX_HOP = 200.f;
+                        Vector3 end = g.getPath().back();
+                        for (auto const& node : g.getPath())
+                        {
+                            if (leader->GetDistance3dToCenter(node.x, node.y, node.z) <= MAX_HOP)
+                                end = node;
+                        }
 
                         // A real path that goes nowhere is worse than no path: PATHFIND_INCOMPLETE
                         // against a target thousands of yards out can come back ending a few yards
@@ -4024,7 +4036,10 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                     // stepLen/endToDest guards above, so only hysteresis breaks the tie: keep the
                     // waypoint we are walking to unless the new one is a real improvement.
                     bool keptTgt = false;
-                    if (usable && p.curTgtSet)
+                    // Commitment must not outlive progress: if the leader has already gone three
+                    // orders without covering ground (the same signal that demotes the mover), the
+                    // committed waypoint is the thing that is wrong, so let it pick a fresh one.
+                    if (usable && p.curTgtSet && !p.forceRawMove)
                     {
                         float const newToDest = std::sqrt((endX - p.destX) * (endX - p.destX) +
                                                           (endY - p.destY) * (endY - p.destY));
