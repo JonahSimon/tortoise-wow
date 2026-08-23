@@ -3511,6 +3511,29 @@ namespace
     };
 }
 
+// MoveTo returning true does NOT mean the bot moved: when TravelPath::makeShortCut clears the
+// resolved path (its closest point farther than reactDistance), MoveTo takes the
+// "Path collapsed - will rebuild next tick" branch and returns true having issued nothing
+// (MovementActions.cpp:1150). Trusting the return value froze a leader at (907,-3907) in Durotar
+// for five minutes, re-pathing to the same target every 2 s while raw MovePoint had walked that
+// same spot fine (phase6d). So verify movement actually started, and keep raw MovePoint as the
+// fallback for when it did not.
+// Log codes: T = MoveTo moved it, F = MoveTo declined -> MovePoint, S = MoveTo silently no-op'd
+// -> MovePoint.
+static char IssueMove(Player* leader, PlayerbotAI* lAI, uint32 mapId, float x, float y, float z)
+{
+    if (F2Mover(lAI).MoveTo(mapId, x, y, z))
+    {
+        if (leader->IsMoving())
+            return 'T';
+        leader->GetMotionMaster()->MovePoint(990001, x, y, z, FORCED_MOVEMENT_RUN);
+        return 'S';
+    }
+
+    leader->GetMotionMaster()->MovePoint(990001, x, y, z, FORCED_MOVEMENT_RUN);
+    return 'F';
+}
+
 static void F2Log(std::string const& line)
 {
     std::ofstream f("F2_travel.log", std::ios::app);
@@ -3830,6 +3853,7 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                           " speed=" + std::to_string((int)leader->GetSpeed(MOVE_RUN)));
                     PathType ptype = PATHFIND_BLANK;
                     float endX = 0.f, endY = 0.f, endZ = 0.f;
+                    char moveCode = '?';
 
                     // Take the first REAL navmesh path (NORMAL or INCOMPLETE, and none of
                     // NOPATH/SHORTCUT/NOT_USING_PATH, which mean "straight line through terrain").
@@ -3894,8 +3918,7 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                         p.curTgtY = endY;
                         p.curTgtZ = endZ;
                         p.curTgtSet = true;
-                        if (!F2Mover(lAI).MoveTo(p.mapId, endX, endY, endZ))
-                            leader->GetMotionMaster()->MovePoint(990001, endX, endY, endZ, FORCED_MOVEMENT_RUN);
+                        moveCode = IssueMove(leader, lAI, p.mapId, endX, endY, endZ);
                     }
                     else
                     {
@@ -3906,12 +3929,12 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                         float const step = std::min(10.0f, flat);
                         float const nx = (flat > 1.0f) ? lx + dx / flat * step : p.destX;
                         float const ny = (flat > 1.0f) ? ly + dy / flat * step : p.destY;
-                        if (!F2Mover(lAI).MoveTo(p.mapId, nx, ny, lz))
-                            leader->GetMotionMaster()->MovePoint(990001, nx, ny, lz, FORCED_MOVEMENT_RUN);
+                        moveCode = IssueMove(leader, lAI, p.mapId, nx, ny, lz);
                     }
 
                     std::ostringstream o;
                     o << "PATH type=" << (uint32)ptype << " usable=" << usable
+                      << " mv=" << moveCode
                       << " remaining=" << (int)leader->GetDistance2dToCenter(p.destX, p.destY)
                       << " mounted=" << leader->IsMounted() << " inWater=" << leader->IsInWater();
                     F2Log(o.str());
