@@ -3518,11 +3518,19 @@ namespace
 // for five minutes, re-pathing to the same target every 2 s while raw MovePoint had walked that
 // same spot fine (phase6d). So verify movement actually started, and keep raw MovePoint as the
 // fallback for when it did not.
-// Log codes: T = MoveTo moved it, F = MoveTo declined -> MovePoint, S = MoveTo silently no-op'd
-// -> MovePoint.
-static char IssueMove(Player* leader, PlayerbotAI* lAI, uint32 mapId, float x, float y, float z)
+// Nor does IsMoving() right after the call mean it is going anywhere: TravelPath::ClipPath
+// truncates the path at any hostile in aggro range and at remembered hazards, and cutTo() can
+// leave a path barely longer than the bot itself. Measured at (1140,-4177) in Durotar: mv=T on
+// every order, the leader moving each time, covering about one yard per order for two minutes
+// until the stall detector disbanded the party.
+//
+// So the only honest test of a mover is ground covered, which the caller tracks across orders.
+// Log codes: T = MoveTo took it, S = MoveTo claimed success but issued no movement, F = MoveTo
+// declined, P = MoveTo demoted for not delivering, raw MovePoint driving.
+static char IssueMove(Player* leader, PlayerbotAI* lAI, uint32 mapId, float x, float y, float z,
+                      bool forceRaw)
 {
-    if (F2Mover(lAI).MoveTo(mapId, x, y, z))
+    if (!forceRaw && F2Mover(lAI).MoveTo(mapId, x, y, z))
     {
         if (leader->IsMoving())
             return 'T';
@@ -3531,7 +3539,7 @@ static char IssueMove(Player* leader, PlayerbotAI* lAI, uint32 mapId, float x, f
     }
 
     leader->GetMotionMaster()->MovePoint(990001, x, y, z, FORCED_MOVEMENT_RUN);
-    return 'F';
+    return forceRaw ? 'P' : 'F';
 }
 
 static void F2Log(std::string const& line)
@@ -3855,6 +3863,28 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                     float endX = 0.f, endY = 0.f, endZ = 0.f;
                     char moveCode = '?';
 
+                    // Did the previous order actually take us anywhere? Three dead orders in a
+                    // row and MoveTo loses the wheel until it earns it back.
+                    if (p.lastOrderSet)
+                    {
+                        float const covered = leader->GetDistance2dToCenter(p.lastOrderX, p.lastOrderY);
+                        if (covered < 5.f)
+                        {
+                            if (p.deadOrders < 250)
+                                ++p.deadOrders;
+                            if (p.deadOrders >= 3)
+                                p.forceRawMove = true;
+                        }
+                        else
+                        {
+                            p.deadOrders = 0;
+                            p.forceRawMove = false;
+                        }
+                    }
+                    p.lastOrderX = lx;
+                    p.lastOrderY = ly;
+                    p.lastOrderSet = true;
+
                     // Take the first REAL navmesh path (NORMAL or INCOMPLETE, and none of
                     // NOPATH/SHORTCUT/NOT_USING_PATH, which mean "straight line through terrain").
                     auto tryTarget = [&](float tgx, float tgy, float tgz) -> bool
@@ -3918,7 +3948,7 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                         p.curTgtY = endY;
                         p.curTgtZ = endZ;
                         p.curTgtSet = true;
-                        moveCode = IssueMove(leader, lAI, p.mapId, endX, endY, endZ);
+                        moveCode = IssueMove(leader, lAI, p.mapId, endX, endY, endZ, p.forceRawMove);
                     }
                     else
                     {
@@ -3929,7 +3959,7 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                         float const step = std::min(10.0f, flat);
                         float const nx = (flat > 1.0f) ? lx + dx / flat * step : p.destX;
                         float const ny = (flat > 1.0f) ? ly + dy / flat * step : p.destY;
-                        moveCode = IssueMove(leader, lAI, p.mapId, nx, ny, lz);
+                        moveCode = IssueMove(leader, lAI, p.mapId, nx, ny, lz, p.forceRawMove);
                     }
 
                     std::ostringstream o;

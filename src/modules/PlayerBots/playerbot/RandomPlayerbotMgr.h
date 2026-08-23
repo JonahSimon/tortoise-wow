@@ -282,6 +282,13 @@ public:
             bool curTgtSet = false;
             float bestDist = 1e9f;        // closest 3D approach to the destination so far
             uint32 bestProgressTime = 0;  // last time bestDist improved (anti-circling)
+            // MoveTo is the better mover but it silently delivers no travel in places (its path
+            // gets clipped at hostiles and hazards, or collapses in makeShortCut). Judge it on
+            // ground covered between orders, and demote to raw MovePoint when it stops delivering.
+            float lastOrderX = 0.f, lastOrderY = 0.f;
+            bool lastOrderSet = false;
+            uint8 deadOrders = 0;      // consecutive orders that moved the leader < 5 yards
+            bool forceRawMove = false; // sticky until an order actually covers ground
         };
         std::vector<TravelParty> _travelParties;
         uint32 _travelPartyTime = 0;
