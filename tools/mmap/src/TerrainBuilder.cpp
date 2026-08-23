@@ -645,7 +645,12 @@ namespace MMAP
                 int offset = meshData.solidVerts.size() / 3;
 
                 copyVertices(transformedVertices, meshData.solidVerts); // (x, y, z) -> (y, z, x)
+                int const firstTri = meshData.solidTris.size() / 3;
                 copyIndices(tempTriangles, meshData.solidTris, offset, isM2);
+                // 0x2000 = indoor, 0x8 = outdoor (WorldModel.h). Cave and tunnel floors are
+                // indoor groups, and they are what the undermap filter must not eat.
+                meshData.MarkTriangles(firstTri, meshData.solidTris.size() / 3,
+                                       ((*it).GetMogpFlags() & 0x2000) != 0);
 
                 // now handle liquid data
                 if (liquid)

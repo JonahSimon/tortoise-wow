@@ -22,6 +22,8 @@
 #include <set>
 
 #include "MMapCommon.h"
+
+#include <vector>
 #include "../../../src/game/Maps/MoveMapSharedDefines.h"
 
 #include "WorldModel.h"
@@ -86,6 +88,25 @@ namespace MMAP
         bool IsTerrainTriangle(int tri) const { return tri < vmapFirstTriangle || tri >=  vmapLastTriangle; }
         int vmapFirstTriangle;
         int vmapLastTriangle;
+
+        // WMO interior groups (MOGP flag 0x2000) - cave floors, tunnels, building interiors.
+        // They sit below the terrain heightmap by definition, so the undermap filter in
+        // TileBuilder throws them away with the genuine buried-junk geometry unless something
+        // tells it they are real walkable rooms. This marks them at load time, while the group
+        // they came from is still in hand.
+        std::vector<bool> indoorTri;
+        bool IsIndoorTriangle(int tri) const
+        {
+            return tri >= 0 && tri < (int)indoorTri.size() && indoorTri[tri];
+        }
+        void MarkTriangles(int first, int last, bool indoor)
+        {
+            if ((int)indoorTri.size() < last)
+                indoorTri.resize(last, false);
+            if (indoor)
+                for (int i = first; i < last; ++i)
+                    indoorTri[i] = true;
+        }
     };
 
     class TerrainBuilder

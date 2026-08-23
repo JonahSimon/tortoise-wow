@@ -427,6 +427,10 @@ namespace MMAP
                 // - Also we want to remove under-terrain triangles
                 unsigned char* areas = new unsigned char[tTriCount];
                 memset(areas, 0, tTriCount * sizeof(unsigned char));
+                // Confound-free counters: these print unconditionally below, so "the filter did
+                // nothing" and "this build never ran the new code" cannot look the same.
+                uint32 undermapCulled = 0;
+                uint32 indoorSpared = 0;
                 float norm[3];
                 const float playerClimbLimit = cosf(52.0f / 180.0f * RC_PI);
                 const float maxClimbLimitTerrain = cosf(75.0f / 180.0f * RC_PI);
@@ -459,7 +463,15 @@ namespace MMAP
                     }
                     // Now we remove underterrain triangles (actually set flags to 0)
                     // This prevents selecting wrong poly for a player in the server later.
-                    if (!terrain && areas[i])
+                    // ... except for WMO interior groups. A cave floor is below the terrain
+                    // heightmap and has a ceiling overhead, which is exactly the shape this test
+                    // looks for, so every cave, tunnel and underground entrance loses its mesh
+                    // here. Sparing indoor groups is what --keepIndoorModels does.
+                    if (!terrain && areas[i] && gKeepIndoorModels && meshData.IsIndoorTriangle(i))
+                    {
+                        ++indoorSpared;
+                    }
+                    else if (!terrain && areas[i])
                     {
                         // Get triangle corners (as usual, yzx positions)
                         // (actually we push these corners towards the center a bit to prevent collision with border models etc...)
@@ -475,10 +487,15 @@ namespace MMAP
                         if ((undermap1 + undermap2 + undermap3) == 3)
                         {
                             areas[i] = 0;
+                            ++undermapCulled;
                             continue;
                         }
                     }
                 }
+                printf("%s undermap: culled %u model tris, spared %u indoor tris%s\n",
+                       tileString, undermapCulled, indoorSpared,
+                       gKeepIndoorModels ? " (--keepIndoorModels ON)" : "");
+
                 /// 4. Every triangle is correctly marked now, we can rasterize everything
                 rcRasterizeTriangles(m_rcContext, tVerts, tVertCount, tTris, areas, tTriCount, *tile.solid, bShouldIncludeWalkableLimitOnRasterize ? walkableClimbTerrain : 0);
                 delete[] areas;

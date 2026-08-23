@@ -87,7 +87,10 @@ void printUsage()
     printf("--silent : Make script friendly. No wait for user input, error, completion.\n");
     printf("--force : Generate mmtiles even if it's already exist.\n");
     printf("--doNotFilterDeepWater : Generate navmesh on deep water.\n");
-    printf("--offMeshInput [file.*] : Path to file containing off mesh connections data.\n\n");
+    printf("--offMeshInput [file.*] : Path to file containing off mesh connections data.\n");
+    printf("--keepIndoorModels : Keep WMO interior groups (cave/tunnel floors) that the\n"
+           "                     undermap filter would otherwise remove. Needed for bots to\n"
+           "                     path into cave entrances.\n\n");
     printf("Example:\nmovemapgen (generate all mmap with default arg\n"
            "movemapgen 0 (generate map 0)\n"
            "movemapgen 0 --tile 34,46 (builds only tile 34,46 of map 0)\n\n");
@@ -239,6 +242,10 @@ bool handleArgs(int argc, char** argv,
                 bigBaseUnit = false;
             else
                 printf("invalid option for '--bigBaseUnit', using default false\n");
+        }
+        else if (strcmp(argv[i], "--keepIndoorModels") == 0)
+        {
+            gKeepIndoorModels = true;
         }
         else if (strcmp(argv[i], "--offMeshInput") == 0)
         {

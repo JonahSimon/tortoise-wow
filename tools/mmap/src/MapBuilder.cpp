@@ -32,6 +32,7 @@ extern std::string gMapSettingsFilename;
 namespace MMAP
 {
     MapBuilderConfig gMMapBuilderConfig;
+    bool gKeepIndoorModels = false;
 
     MapBuilder::MapBuilder(bool skipLiquid, bool skipContinents, bool skipJunkMaps, bool skipBattlegrounds, bool debugOutput, bool bigBaseUnit, bool quick, const char* offMeshFilePath) :
         m_terrainBuilder(nullptr), m_debugOutput(debugOutput), m_offMeshFilePath(offMeshFilePath), m_skipContinents(skipContinents), m_skipJunkMaps(skipJunkMaps),

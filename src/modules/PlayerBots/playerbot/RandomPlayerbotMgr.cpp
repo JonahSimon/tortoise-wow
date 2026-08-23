@@ -3801,6 +3801,17 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                 float const toTgt = p.curTgtSet ? leader->GetDistance2dToCenter(p.curTgtX, p.curTgtY) : 1e9f;
                 if (!done && (!leader->IsMoving() || !p.curTgtSet || toTgt <= 12.f))
                 {
+                    // Instrument: a re-path every tick means the spline is being cancelled almost
+                    // as fast as it is issued, and these three fields say by what. `why` is the
+                    // condition that fired, `mm` is whatever movement generator is on top right
+                    // now (a PointMovementGenerator here means ours survived; anything else means
+                    // something took it), `mounted` catches the mount-attempt loop.
+                    F2Log("REPATH why=" + std::string(!leader->IsMoving() ? "notMoving"
+                                                      : (!p.curTgtSet ? "noTgt" : "reachedTgt")) +
+                          " toTgt=" + std::to_string((int)(toTgt > 1e8f ? -1.f : toTgt)) +
+                          " mm=" + std::to_string((uint32)leader->GetMotionMaster()->GetCurrentMovementGeneratorType()) +
+                          " mounted=" + std::to_string(leader->IsMounted() ? 1 : 0) +
+                          " speed=" + std::to_string((int)leader->GetSpeed(MOVE_RUN)));
                     PathType ptype = PATHFIND_BLANK;
                     float endX = 0.f, endY = 0.f, endZ = 0.f;
 

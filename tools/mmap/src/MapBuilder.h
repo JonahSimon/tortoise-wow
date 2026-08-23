@@ -141,6 +141,10 @@ namespace MMAP
     };
 
     extern MapBuilderConfig gMMapBuilderConfig;
+
+    // --keepIndoorModels: do not let the undermap filter eat WMO interior groups (cave and
+    // tunnel floors). Off by default, so an unflagged run reproduces the old mesh exactly.
+    extern bool gKeepIndoorModels;
 }
 
 #endif
