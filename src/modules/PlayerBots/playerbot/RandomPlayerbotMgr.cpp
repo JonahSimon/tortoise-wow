@@ -5,6 +5,7 @@
 #include "playerbot/PlayerbotFactory.h"
 #include "playerbot/PerformanceMonitor.h"
 #include "strategy/values/LastMovementValue.h"
+#include "strategy/actions/MovementActions.h"
 #include "AccountMgr.h"
 #include "ObjectMgr.h"
 #include "Database/DatabaseEnv.h"
@@ -3495,6 +3496,21 @@ std::vector<WorldLocation> RandomPlayerbotMgr::GetPlayerZoneTeleportLocations(Pl
 
 // Telemetry to a plain file in the server's working directory, where the other logs land.
 // ponytail: debug instrument for the walk validation; drop it once the route is proven.
+// Raw MotionMaster::MovePoint does not survive on a bot: the leader was measured sitting on
+// IDLE_MOTION_TYPE on the very next tick with its target still 847 yd away, so the march only
+// advanced in the gap between our order and whatever cleared it (REPATH instrument, 2026-08-23).
+// Every other bot in the module moves through MovementAction::MoveTo, which does the pathing and
+// the AI's own movement bookkeeping - it is protected, so this exposes it.
+namespace
+{
+    class F2Mover : public ai::MovementAction
+    {
+    public:
+        explicit F2Mover(PlayerbotAI* ai) : MovementAction(ai, "f2 travel") {}
+        using ai::MovementAction::MoveTo;
+    };
+}
+
 static void F2Log(std::string const& line)
 {
     std::ofstream f("F2_travel.log", std::ios::app);
@@ -3878,7 +3894,8 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                         p.curTgtY = endY;
                         p.curTgtZ = endZ;
                         p.curTgtSet = true;
-                        leader->GetMotionMaster()->MovePoint(990001, endX, endY, endZ, FORCED_MOVEMENT_RUN);
+                        if (!F2Mover(lAI).MoveTo(p.mapId, endX, endY, endZ))
+                            leader->GetMotionMaster()->MovePoint(990001, endX, endY, endZ, FORCED_MOVEMENT_RUN);
                     }
                     else
                     {
@@ -3889,7 +3906,8 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                         float const step = std::min(10.0f, flat);
                         float const nx = (flat > 1.0f) ? lx + dx / flat * step : p.destX;
                         float const ny = (flat > 1.0f) ? ly + dy / flat * step : p.destY;
-                        leader->GetMotionMaster()->MovePoint(990001, nx, ny, lz, FORCED_MOVEMENT_RUN);
+                        if (!F2Mover(lAI).MoveTo(p.mapId, nx, ny, lz))
+                            leader->GetMotionMaster()->MovePoint(990001, nx, ny, lz, FORCED_MOVEMENT_RUN);
                     }
 
                     std::ostringstream o;
