@@ -4015,6 +4015,31 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                         }
                     }
 
+                    // Commit to a waypoint instead of re-picking one every tick. An INCOMPLETE
+                    // path against a destination thousands of yards out returns whichever poly is
+                    // currently closest-reachable, and beside an obstacle that flips between two
+                    // endpoints on either side of it. Measured at (740,-3804): toTgt swinging
+                    // 456 -> 426 -> 499 -> 479 while the leader moved about five yards, i.e. the
+                    // target was moving 70 yd a tick, not the bot. Both candidates clear the
+                    // stepLen/endToDest guards above, so only hysteresis breaks the tie: keep the
+                    // waypoint we are walking to unless the new one is a real improvement.
+                    bool keptTgt = false;
+                    if (usable && p.curTgtSet)
+                    {
+                        float const newToDest = std::sqrt((endX - p.destX) * (endX - p.destX) +
+                                                          (endY - p.destY) * (endY - p.destY));
+                        float const curToDest = std::sqrt((p.curTgtX - p.destX) * (p.curTgtX - p.destX) +
+                                                          (p.curTgtY - p.destY) * (p.curTgtY - p.destY));
+                        if (newToDest > curToDest - 10.f &&
+                            leader->GetDistance2dToCenter(p.curTgtX, p.curTgtY) > 12.f)
+                        {
+                            endX = p.curTgtX;
+                            endY = p.curTgtY;
+                            endZ = p.curTgtZ;
+                            keptTgt = true;
+                        }
+                    }
+
                     if (usable)
                     {
                         p.curTgtX = endX;
@@ -4037,7 +4062,7 @@ void RandomPlayerbotMgr::UpdateTravelParties()
 
                     std::ostringstream o;
                     o << "PATH type=" << (uint32)ptype << " usable=" << usable
-                      << " mv=" << moveCode
+                      << " mv=" << moveCode << " keep=" << (keptTgt ? 1 : 0)
                       << " remaining=" << (int)leader->GetDistance2dToCenter(p.destX, p.destY)
                       << " mounted=" << leader->IsMounted() << " inWater=" << leader->IsInWater();
                     F2Log(o.str());
