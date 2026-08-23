@@ -289,6 +289,10 @@ public:
             bool lastOrderSet = false;
             uint8 deadOrders = 0;      // consecutive orders that moved the leader < 5 yards
             bool forceRawMove = false; // sticky until an order actually covers ground
+            // A party that walks through hostile territory has to be allowed to stop and fight.
+            bool inCombat = false;     // any member was fighting as of last tick
+            uint32 combatStart = 0;    // unix time the current fight began
+            uint32 recoverUntil = 0;   // hold here until this time so the crew can eat and drink
         };
         std::vector<TravelParty> _travelParties;
         uint32 _travelPartyTime = 0;

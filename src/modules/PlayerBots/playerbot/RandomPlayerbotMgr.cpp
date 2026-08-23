@@ -3530,7 +3530,11 @@ namespace
 static char IssueMove(Player* leader, PlayerbotAI* lAI, uint32 mapId, float x, float y, float z,
                       bool forceRaw)
 {
-    if (!forceRaw && F2Mover(lAI).MoveTo(mapId, x, y, z))
+    // ignoreEnemyTargets: ClipPath otherwise truncates the path just short of any hostile in
+    // aggro range, so the leader stops a few yards away, never pulls, and re-paths there forever
+    // - the (826,-3869) deadlock. Walking in and taking the fight is the intended behaviour now
+    // that the march yields to combat.
+    if (!forceRaw && F2Mover(lAI).MoveTo(mapId, x, y, z, false, false, false, true))
     {
         if (leader->IsMoving())
             return 'T';
@@ -3768,6 +3772,75 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                 float const ly = leader->GetPositionY();
                 float const lz = leader->GetPositionZ();
                 float const destDist = leader->GetDistance3dToCenter(p.destX, p.destY, p.destZ);
+
+                // Fighting is part of travelling, not a failure of it. While any member is in
+                // combat the march yields completely: no movement orders (they would fight the
+                // combat engine for the leader), no straggler snapping (it would yank a bot out
+                // of its fight), and the stall clock and deadline both stop, because a legitimate
+                // pull-kill-eat cycle takes far longer than the 90 s no-progress limit.
+                bool fighting = false;
+                for (ObjectGuid const& guid : p.memberGuids)
+                {
+                    Player* member = sObjectMgr.GetPlayer(guid);
+                    if (member && member->IsInWorld() && member->IsInCombat())
+                    {
+                        fighting = true;
+                        break;
+                    }
+                }
+
+                if (fighting && !p.inCombat)
+                {
+                    p.inCombat = true;
+                    p.combatStart = now;
+                    F2Log("COMBAT start at " + std::to_string((int)destDist) + " yd out");
+                }
+                else if (!fighting && p.inCombat)
+                {
+                    uint32 const spent = now - p.combatStart;
+                    p.inCombat = false;
+                    p.deadline += spent;   // the fight does not eat the travel budget
+                    p.curTgtSet = false;   // re-path fresh from wherever the fight ended
+                    p.deadOrders = 0;
+                    p.forceRawMove = false;
+                    p.lastOrderSet = false;
+                    p.bestProgressTime = now;
+                    // The `food` strategy is in the default non-combat engine and the march never
+                    // strips it, so the crew feeds itself - but only if nothing is ordering it to
+                    // move. Give it a window before marching on, or the next pull lands on a party
+                    // that never healed up.
+                    p.recoverUntil = now + 45;
+                    p.deadline += 45;  // grant the whole window up front; over-granting a safety
+                                       // net costs nothing, cutting a march short costs the test
+                    F2Log("COMBAT end after " + std::to_string(spent) + "s, resuming march");
+                }
+
+                bool holding = p.inCombat;
+                if (!holding && now < p.recoverUntil)
+                {
+                    // ponytail: health only, no mana check - a healer out of mana still walks.
+                    // Add power if wipes downstream of an OOM healer show up in the telemetry.
+                    for (ObjectGuid const& guid : p.memberGuids)
+                    {
+                        Player* member = sObjectMgr.GetPlayer(guid);
+                        if (member && member->IsInWorld() && member->IsAlive() &&
+                            lAI->GetHealthPercent(*member) < 80)
+                        {
+                            holding = true;
+                            break;
+                        }
+                    }
+
+                    if (!holding)
+                        p.recoverUntil = 0;  // everyone topped up early, get moving
+                }
+
+                if (holding)
+                {
+                    p.bestProgressTime = now;  // freeze the stall clock while fighting or eating
+                    ++it;
+                    continue;
+                }
 
                 if (destDist < p.bestDist - 2.0f)
                 {
