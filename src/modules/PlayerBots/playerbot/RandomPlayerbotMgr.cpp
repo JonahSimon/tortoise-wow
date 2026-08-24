@@ -3539,9 +3539,16 @@ namespace
 // MOVE_RUN_MODE, so walk/run was left to the spline default.
 //
 // TravelPartyMoveMode picks the mover so the three can be compared without a rebuild:
-//   0 = as shipped: MovePoint with the accidental MOVE_PATHFINDING (the control)
-//   1 = MovePoint with the flags actually intended: MOVE_PATHFINDING | MOVE_RUN_MODE
+//   0 = the old accidental MOVE_PATHFINDING, kept only as a control for A/B runs
+//   1 = MovePoint with the flags actually intended: MOVE_PATHFINDING | MOVE_RUN_MODE  (DEFAULT)
 //   2 = MovePath along the path F2 already computed - one query, nothing to disagree with
+//
+// ⚠️ This whole path is the FALLBACK. A healthy march never reaches it: the 2026-08-23 phase8
+// baseline logged 'T' on 85 of 85 orders, so `mv=S`/`mv=P`/`mv=F` are the only ways in. The flag
+// bug was therefore dormant, not the cause of the 2026-08-23 wedges - those were fixed by the
+// 200 yd hop cap in c0b9025. It is fixed here so that the fallback is correct the day it does
+// fire, and so the "demote to raw MovePoint" comment stops being a lie: mode 0 re-ran the very
+// same navmesh query the module layer had just run, which is why demotion never rescued anything.
 static char IssueMove(Player* leader, PlayerbotAI* lAI, uint32 mapId, float x, float y, float z,
                       bool forceRaw, Movement::PointsArray const& f2Path)
 {
@@ -3804,9 +3811,25 @@ void RandomPlayerbotMgr::UpdateTravelParties()
             sLog.outString("F2: travel party timed out; disbanding.");
             done = true;
         }
-        else if (leader->GetDistance3dToCenter(p.destX, p.destY, p.destZ) <= 20.f)
+        // Arrival is judged in 2D with a generous vertical tolerance, not in 3D.
+        //
+        // Measured 2026-08-23 against the real Wailing Caverns door (trigger 228,
+        // -753.60,-2212.78,21.54): two parties in a row walked the whole 3145 yd route and parked
+        // at (-753,-2212,102) and (-753,-2212,105) - the SAME x and y, under one yard away
+        // horizontally, ~80 yd straight up. They were standing on the cliff directly above the
+        // cave mouth, because the ravine descent is not on map 1's navmesh, and PathFinder
+        // correctly returned PATHFIND_NOPATH for the last 80 yd. A 3D check calls that a failure
+        // at 81 yd; by any useful reading the party is at the door.
+        //
+        // 20 yd horizontal keeps the old tightness where it means something. 100 yd vertical
+        // covers a cliff-top-above-a-cave-mouth without being unbounded - the drop here is 80 yd
+        // and the deepest entrance in the registry (Black Morass, z=-200) sits in a canyon of
+        // similar order. ponytail: two constants, not a per-entrance tolerance column; add one to
+        // [[dungeon-entrances]] only if a real door needs it.
+        else if (leader->GetDistance2dToCenter(p.destX, p.destY) <= 20.f &&
+                 std::fabs(leader->GetPositionZ() - p.destZ) <= 100.f)
         {
-            F2Log("ARRIVED (3D<=20) -> disband");
+            F2Log("ARRIVED (2D<=20, dZ<=100) -> disband");
             sLog.outString("F2: travel party reached the destination; disbanding.");
             done = true;
         }
@@ -4148,8 +4171,13 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                     // MoveSplineInit performs internally for a MOVE_PATHFINDING order. If p1 is
                     // healthy and p2 collapses to 0/1, the two queries disagree and the second one
                     // is what strands the leader - the whole point of this instrument.
-                    int p2 = -1;
-                    if (usable)
+                    //
+                    // Only run it when the mover already reported trouble. A healthy march is
+                    // 'T' on every order and would otherwise pay for a second navmesh query every
+                    // couple of seconds per party, which stops being free once G2 lifts the
+                    // one-party cap. p2=-2 means "not measured because nothing was wrong".
+                    int p2 = -2;
+                    if (usable && moveCode != 'T')
                     {
                         PathFinder v(leader);
                         v.calculate(endX, endY, endZ);
