@@ -32,6 +32,7 @@
 #include "Maps/PathFinder.h"
 #include "Group/Group.h"
 #include "Movement/spline/MoveSpline.h"
+#include "playerbot/strategy/Engine.h"
 #include "Movement/MotionMaster.h"
 
 #include <fstream>
@@ -4247,7 +4248,14 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                   << " moving=" << leader->IsMoving()
                   << " active=" << lAI->AllowActivity(ALL_ACTIVITY, true)
                   << " groupSpread=" << (int)p.maxMemberDist
-                  << " lvl=" << leader->GetLevel() << " cls=" << (uint32)leader->getClass();
+                  << " lvl=" << leader->GetLevel() << " cls=" << (uint32)leader->getClass()
+                  // The last action the leader's OWN engine ran. Static reading of WanderStrategy
+                  // said only `wander near` -> `stop follow` could be active, and that
+                  // StopFollowAction::isUseful() gates on FOLLOW_MOTION_TYPE so it could never
+                  // fire during a POINT-driven march - yet stripping `wander` changed the median
+                  // re-path from 2.0 s to 23 s. The measurement wins, so name the action instead
+                  // of reasoning about it.
+                  << " lastAct=" << (lAI->GetCurrentEngine() ? lAI->GetCurrentEngine()->GetLastAction() : "<no engine>");
                 // Every non-combat strategy still live on the leader. The march only removes
                 // TravelPartyLeaderStrip; everything else here runs its own actions every tick and
                 // can cancel the march spline. Printed so the "who is stopping the leader"
