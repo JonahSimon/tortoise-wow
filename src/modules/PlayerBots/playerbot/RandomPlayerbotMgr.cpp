@@ -3756,6 +3756,23 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
                 // reqLevel above the cap is content nobody on this core can enter (Grim Batol, 61).
                 if (d.reqLevel > MAX_TRAVEL_DEST_LEVEL)
                     continue;
+
+                // G16: do not march a party into the ENEMY'S CAPITAL. Stormwind Vault and
+                // Stormwind Stockades sit inside Stormwind, Ragefire Chasm inside Orgrimmar, so a
+                // naive same-map filter happily picked "Stormwind Vault from Ruins of Lordaeron"
+                // - a Horde party walking into the Alliance capital, straight into the guards.
+                // Observed live 2026-08-24 on the first multi-muster run.
+                //
+                // Keyed on AREA_FLAG_CAPITAL rather than the zone's team alone, because team
+                // alone is far too blunt: Scarlet Monastery sits in Tirisfal (Horde territory) and
+                // Alliance parties absolutely should still run it. Only capitals are lethal.
+                if (AreaTableEntry const* destArea =
+                        GetAreaEntryByAreaID(sTerrainMgr.GetZoneId(d.map, d.x, d.y, d.z)))
+                {
+                    if ((destArea->flags & AREA_FLAG_CAPITAL) && destArea->team &&
+                        destArea->team != m.team)
+                        continue;
+                }
                 uint32 have = 0;
                 for (uint32 l = d.minLevel; l <= d.maxLevel && l <= 80; ++l)
                     have += perLevel[l];
