@@ -3710,6 +3710,43 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
 
     if (sPlayerbotAIConfig.travelPartyUseRegistry)
     {
+        // One-shot eligibility matrix. Selection filters are otherwise invisible until chance
+        // happens to exercise them - G16 (enemy capitals) was found only because a Horde party was
+        // caught mid-march to Stormwind Vault, and with a 3-party cap and 20 minute marches you
+        // might wait an hour for the next one. This prints the whole muster x destination table on
+        // the first spawn attempt so every filter can be checked deterministically.
+        static bool dumped = false;
+        if (!dumped)
+        {
+            dumped = true;
+            for (TravelMuster const& m : kMusters)
+            {
+                uint32 ok = 0;
+                std::string blocked;
+                for (TravelDest const& d : kTravelDests)
+                {
+                    if (d.map != m.map)
+                        continue;
+                    if (d.reqLevel > MAX_TRAVEL_DEST_LEVEL)
+                    {
+                        blocked += std::string(d.name) + "(cap) ";
+                        continue;
+                    }
+                    AreaTableEntry const* a =
+                        GetAreaEntryByAreaID(sTerrainMgr.GetZoneId(d.map, d.x, d.y, d.z));
+                    if (a && (a->flags & AREA_FLAG_CAPITAL) && a->team && a->team != m.team)
+                    {
+                        blocked += std::string(d.name) + "(enemy capital) ";
+                        continue;
+                    }
+                    ++ok;
+                }
+                F2Log("REGISTRY " + std::string(m.name) + " team=" + std::to_string(m.team) +
+                      " map=" + std::to_string(m.map) + " eligible=" + std::to_string(ok) +
+                      (blocked.empty() ? "" : " blocked: " + blocked));
+            }
+        }
+
         // Destination first, then recruit to fit it - the reverse of the config path, and the
         // reason a low-level party stops being sent across the Barrens: it gets an instance its
         // own level range can reach.
