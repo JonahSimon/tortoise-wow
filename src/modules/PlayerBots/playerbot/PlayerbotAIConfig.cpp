@@ -282,6 +282,13 @@ bool PlayerbotAIConfig::Initialize()
     // .env drive the config pair, and the standing rule for this port is that new behaviour ships
     // disabled until it has been watched working.
     travelPartyUseRegistry = config.GetBoolDefault("AiPlayerbot.TravelPartyUseRegistry", false);
+    // G2: how many marches may run at once. Was hard-coded to 1 with a `ponytail:` note to lift it
+    // "once a walk has been watched end to end" - which G1's fix delivered. 3 is deliberately
+    // modest: 3 parties x 5 bots is 15 of a 1000-bot pool, and every extra party is another
+    // independent sample per wall-clock minute, which is what makes the remaining gaps testable.
+    travelPartyMaxConcurrent = config.GetIntDefault("AiPlayerbot.TravelPartyMaxConcurrent", 3);
+    if (travelPartyMaxConcurrent < 1)
+        travelPartyMaxConcurrent = 1;
     // Which strategies the march takes off the leader.
     //
     // `loot` is the one that matters, and it was missing for the whole port. Read off the leader's

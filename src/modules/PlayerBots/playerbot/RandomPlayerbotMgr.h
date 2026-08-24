@@ -270,6 +270,9 @@ public:
         struct TravelParty
         {
             ObjectGuid leaderGuid;
+            // Kept as a string so telemetry can still name the party after the leader object is
+            // gone - which is exactly when LEADER LOST fires and you most want to know who it was.
+            std::string leaderName;
             std::vector<ObjectGuid> memberGuids;  // includes the leader
             uint32 mapId = 0;
             float destX = 0.f, destY = 0.f, destZ = 0.f;

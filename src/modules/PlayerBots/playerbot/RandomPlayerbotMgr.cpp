@@ -3693,8 +3693,13 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
     if (!sPlayerbotAIConfig.travelParties)
         return "";
 
-    // ponytail: one party at a time. Lift the cap once a walk has been watched end to end.
-    if (!_travelParties.empty())
+    // The cap this replaces was `ponytail: one party at a time. Lift the cap once a walk has been
+    // watched end to end.` That condition is met - marches now complete reliably since G1's `loot`
+    // fix (3cc6e1e), verified 2/2 to the cave rim and 2/2 to the real instance door.
+    //
+    // Lifting it is also what makes long registry routes harmless: a 9465 yd march is only a
+    // problem while it owns the single slot for half an hour (G14).
+    if (_travelParties.size() >= sPlayerbotAIConfig.travelPartyMaxConcurrent)
         return "";
 
     WorldLocation muster, dest;
@@ -3866,6 +3871,7 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
 
     TravelParty party;
     party.leaderGuid = leader->GetObjectGuid();
+    party.leaderName = leader->GetName();
     party.memberGuids.push_back(leader->GetObjectGuid());
     party.mapId = dest.mapId;
     party.destX = dest.x;
@@ -3926,6 +3932,11 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
     return std::string(leader->GetName());
 }
 
+// Every per-party log line carries its leader's name. With one party at a time the plain lines
+// were readable; with several marching at once an untagged F2_travel.log interleaves into
+// nonsense - and that log is the instrument that found G1's cause. Tag before lifting the cap.
+#define F2LogParty(p, line) F2Log("[" + (p).leaderName + "] " + (line))
+
 void RandomPlayerbotMgr::UpdateTravelParties()
 {
     if (_travelParties.empty())
@@ -3951,12 +3962,12 @@ void RandomPlayerbotMgr::UpdateTravelParties()
             else if (!leader->IsAlive())       o << "dead at " << (int)leader->GetDistance3dToCenter(p.destX, p.destY, p.destZ) << " yd out";
             else                               o << "wrong map " << leader->GetMapId() << " != " << p.mapId;
             o << ") -> disband";
-            F2Log(o.str());
+            F2LogParty(p, o.str());
             done = true;  // leader gone -> tear down
         }
         else if (now >= p.deadline)
         {
-            F2Log("TIMEOUT -> disband");
+            F2LogParty(p, "TIMEOUT -> disband");
             sLog.outString("F2: travel party timed out; disbanding.");
             done = true;
         }
@@ -3976,7 +3987,7 @@ void RandomPlayerbotMgr::UpdateTravelParties()
         else if (leader->GetDistance2dToCenter(p.destX, p.destY) <= 20.f &&
                  std::fabs(leader->GetPositionZ() - p.destZ) <= sPlayerbotAIConfig.travelPartyArriveZ)
         {
-            F2Log("ARRIVED (2D<=20, dZ<=" +
+            F2LogParty(p, "ARRIVED (2D<=20, dZ<=" +
                   std::to_string((int)sPlayerbotAIConfig.travelPartyArriveZ) + ") -> disband");
             sLog.outString("F2: travel party reached the destination; disbanding.");
             done = true;
@@ -4034,7 +4045,7 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                 {
                     p.inCombat = true;
                     p.combatStart = now;
-                    F2Log("COMBAT start at " + std::to_string((int)destDist) + " yd out");
+                    F2LogParty(p, "COMBAT start at " + std::to_string((int)destDist) + " yd out");
                 }
                 else if (!fighting && p.inCombat)
                 {
@@ -4053,7 +4064,7 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                     p.recoverUntil = now + 45;
                     p.deadline += 45;  // grant the whole window up front; over-granting a safety
                                        // net costs nothing, cutting a march short costs the test
-                    F2Log("COMBAT end after " + std::to_string(spent) + "s, resuming march");
+                    F2LogParty(p, "COMBAT end after " + std::to_string(spent) + "s, resuming march");
                 }
 
                 bool holding = p.inCombat;
@@ -4085,7 +4096,7 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                     if (now - p.lastLogTime >= 15)
                     {
                         p.lastLogTime = now;
-                        F2Log("HOLD (" + std::string(p.inCombat ? "combat" : "recovery") + ") at " +
+                        F2LogParty(p, "HOLD (" + std::string(p.inCombat ? "combat" : "recovery") + ") at " +
                               std::to_string((int)destDist) + " yd out, " +
                               std::to_string(now - p.combatStart) + "s");
                     }
@@ -4113,7 +4124,7 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                     std::ostringstream o;
                     o << "STALLED " << (nearDest ? "near destination" : "en route") << " (best "
                       << (int)p.bestDist << " yd, now " << (int)destDist << " yd) -> disband";
-                    F2Log(o.str());
+                    F2LogParty(p, o.str());
                     // Near the destination this is "close enough, the navmesh has no route the rest
                     // of the way". Anywhere else it means the march is wedged and would otherwise
                     // burn the whole 15 min deadline in silence, which is not a useful test result.
@@ -4177,7 +4188,7 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                     // condition that fired, `mm` is whatever movement generator is on top right
                     // now (a PointMovementGenerator here means ours survived; anything else means
                     // something took it), `mounted` catches the mount-attempt loop.
-                    F2Log("REPATH why=" + std::string(!leader->IsMoving() ? "notMoving"
+                    F2LogParty(p, "REPATH why=" + std::string(!leader->IsMoving() ? "notMoving"
                                                       : (!p.curTgtSet ? "noTgt" : "reachedTgt")) +
                           " toTgt=" + std::to_string((int)(toTgt > 1e8f ? -1.f : toTgt)) +
                           " mm=" + std::to_string((uint32)leader->GetMotionMaster()->GetCurrentMovementGeneratorType()) +
@@ -4368,7 +4379,7 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                       << F2SplineState(leader)
                       << " remaining=" << (int)leader->GetDistance2dToCenter(p.destX, p.destY)
                       << " mounted=" << leader->IsMounted() << " inWater=" << leader->IsInWater();
-                    F2Log(o.str());
+                    F2LogParty(p, o.str());
                 }
             }
 
@@ -4399,7 +4410,7 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                 o << " strat=";
                 for (auto const& sv : lAI->GetStrategies(BotState::BOT_STATE_NON_COMBAT))
                     o << sv << "|";
-                F2Log(o.str());
+                F2LogParty(p, o.str());
             }
         }
 
