@@ -268,9 +268,18 @@ bool PlayerbotAIConfig::Initialize()
     travelPartyTestMode = config.GetBoolDefault("AiPlayerbot.TravelPartyTestMode", false);
     travelPartyDungeonSize = config.GetIntDefault("AiPlayerbot.TravelPartyDungeonSize", 5);
     travelPartyMoveMode = config.GetIntDefault("AiPlayerbot.TravelPartyMoveMode", 1);
-    // Which strategies the march takes off the leader. Env-tunable so the "who is
-    // cancelling the spline" bisection needs one build, not one per candidate.
-    travelPartyLeaderStrip = config.GetStringDefault("AiPlayerbot.TravelPartyLeaderStrip", "-travel,-grind,-rpg");
+    // Which strategies the march takes off the leader.
+    //
+    // `wander` is the one that matters and it was missing for the whole port. AiFactory gives a
+    // masterless random bot `follow|wander`; the party leader has no master, so it gets `wander`,
+    // which picks its own nearby destination every couple of seconds and cancels the march spline.
+    // Bisected 2026-08-23 by median seconds between re-paths on the same level 7 leader:
+    //   -travel,-grind,-rpg                     -> 2.0 s   (wedges, never arrives)
+    //   the same plus 15 movement-capable ones  -> 24.0 s
+    //   the same plus -wander alone             -> 23.0 s
+    // So wander accounts for the entire effect and the other fourteen contribute nothing
+    // measurable. Env-tunable because that bisection wants to stay one env change, not one build.
+    travelPartyLeaderStrip = config.GetStringDefault("AiPlayerbot.TravelPartyLeaderStrip", "-travel,-grind,-rpg,-wander");
     // Defaults are Turtle's own game_tele rows: `orgrimmarentrance` -> the Wailing Caverns
     // ravine (the WC portal itself sits at -731,-2218,17 per game_tele/areatrigger_teleport,
     // deep inside the cave; the party stops at the outdoor mouth).

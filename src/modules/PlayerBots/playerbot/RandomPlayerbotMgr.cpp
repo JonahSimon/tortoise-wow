@@ -3803,6 +3803,17 @@ void RandomPlayerbotMgr::UpdateTravelParties()
         bool done = false;
         if (!leader || !leader->IsInWorld() || !leader->IsAlive() || leader->GetMapId() != p.mapId)
         {
+            // Say WHY. This used to tear down in silence, so a party that died mid-march looked
+            // exactly like one that never formed - two "FORMED" lines in a row with no verdict
+            // between them. Watched on 2026-08-23 with a level 7 party in the Barrens.
+            std::ostringstream o;
+            o << "LEADER LOST (";
+            if (!leader)                       o << "no player object";
+            else if (!leader->IsInWorld())     o << "not in world";
+            else if (!leader->IsAlive())       o << "dead at " << (int)leader->GetDistance3dToCenter(p.destX, p.destY, p.destZ) << " yd out";
+            else                               o << "wrong map " << leader->GetMapId() << " != " << p.mapId;
+            o << ") -> disband";
+            F2Log(o.str());
             done = true;  // leader gone -> tear down
         }
         else if (now >= p.deadline)
@@ -3931,6 +3942,16 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                 if (holding)
                 {
                     p.bestProgressTime = now;  // freeze the stall clock while fighting or eating
+                    // Heartbeat. This branch used to `continue` past the 15 s telemetry, so a long
+                    // fight wrote NOTHING and the log looked identical to a hung server - which
+                    // tripped a stall watchdog on 2026-08-23. A hold must never be silent.
+                    if (now - p.lastLogTime >= 15)
+                    {
+                        p.lastLogTime = now;
+                        F2Log("HOLD (" + std::string(p.inCombat ? "combat" : "recovery") + ") at " +
+                              std::to_string((int)destDist) + " yd out, " +
+                              std::to_string(now - p.combatStart) + "s");
+                    }
                     ++it;
                     continue;
                 }
