@@ -33,8 +33,10 @@
 #include "Group/Group.h"
 #include "Movement/spline/MoveSpline.h"
 #include "playerbot/strategy/Engine.h"
+#include "playerbot/TravelDestinations.h"
 #include "Movement/MotionMaster.h"
 
+#include <algorithm>
 #include <fstream>
 #include <cmath>
 
@@ -3640,6 +3642,52 @@ bool RandomPlayerbotMgr::IsInTravelParty(Player* bot)
     return false;
 }
 
+// Muster points, one per (faction, continent). Four of these cover every overland instance in
+// TravelDestinations.h, which is why G9 - "muster and destination must share a map" - never needed
+// cross-map routing to be solved.
+//
+// Coordinates come from Turtle's own `game_tele` rows, same source as the original Orgrimmar
+// muster, and every one is OUTDOORS. City interiors are avoided on purpose: `+follow` alone
+// already leaves members stuck on city geometry, and the leader has to path out before the march
+// even starts.
+//
+// ⚠️ Two decisions here that are not obvious:
+//
+// 1. **Alliance/Kalimdor is Auberdine, NOT Darnassus.** Darnassus is on Teldrassil, a separate
+//    landmass reachable only by the Rut'theran boat, and F2 has no boat support - every Alliance
+//    Kalimdor march from Darnassus would fail at the water. Auberdine is the northernmost Alliance
+//    town on the Kalimdor mainland and is connected by road south to Ashenvale and the Barrens.
+// 2. **`team` is stored here rather than read from the muster zone.** The single-config version
+//    derived faction from `AreaTableEntry::team` of the muster's zone, which is fine for one
+//    hand-set point but breaks the moment a muster sits in contested territory. Every coordinate
+//    below is deliberately in its own faction's home zone (Durotar, Tirisfal, Darkshore, Elwynn),
+//    so the two agree - but the table is the authority.
+// This core's level cap. Registry rows above it are unreachable content (Grim Batol, 61).
+static uint32 const MAX_TRAVEL_DEST_LEVEL = 60;
+
+struct TravelMuster
+{
+    uint32 team;    // AreaTableEntry::team convention: 2 = Alliance, 4 = Horde
+    uint32 map;
+    float x, y, z;
+    char const* name;
+};
+
+static TravelMuster const kMusters[] = {
+    { 4, 1,  1493.35f, -4414.17f,  23.00f, "Orgrimmar gates" },      // Durotar
+    { 4, 0,  1830.93f,   236.19f,  60.54f, "Ruins of Lordaeron" },   // Tirisfal, above Undercity
+    { 2, 1,  6501.40f,   481.61f,   6.27f, "Auberdine" },            // Darkshore
+    { 2, 0, -9448.55f,    68.24f,  56.32f, "Goldshire" },            // Elwynn
+};
+
+// Is this bot recruitable for a march at all, faction and state aside from level?
+static bool IsTravelEligible(Player* bot)
+{
+    return bot && bot->IsInWorld() && bot->IsAlive() && !bot->GetGroup() && !bot->IsInCombat() &&
+           !bot->InBattleGround() && !bot->InBattleGroundQueue() &&
+           !bot->IsBeingTeleported() && !bot->IsTaxiFlying() && GetBotAI(bot);
+}
+
 std::string RandomPlayerbotMgr::SpawnTravelParty()
 {
     if (!sPlayerbotAIConfig.travelParties)
@@ -3650,8 +3698,90 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
         return "";
 
     WorldLocation muster, dest;
-    if (!ParseTravelPoint(sPlayerbotAIConfig.travelPartyMuster, muster) ||
-        !ParseTravelPoint(sPlayerbotAIConfig.travelPartyDest, dest))
+    uint32 forcedTeam = 0;          // 0 = derive from the muster zone, as the config path always has
+    uint32 bandMin = sPlayerbotAIConfig.travelPartyMinLevel;
+    uint32 bandMax = sPlayerbotAIConfig.travelPartyMaxLevel;
+    std::string destName;
+
+    if (sPlayerbotAIConfig.travelPartyUseRegistry)
+    {
+        // Destination first, then recruit to fit it - the reverse of the config path, and the
+        // reason a low-level party stops being sent across the Barrens: it gets an instance its
+        // own level range can reach.
+        //
+        // Walk the musters in random order so one continent does not monopolise the (currently
+        // single) party slot, and inside each, keep only the destinations that actually have
+        // enough eligible bots in their own band right now.
+        size_t const musterCount = sizeof(kMusters) / sizeof(kMusters[0]);
+        std::vector<size_t> order(musterCount);
+        for (size_t i = 0; i < musterCount; ++i)
+            order[i] = i;
+        // Fisher-Yates on the core's own urand; this fork has no std-compatible RNG engine to
+        // hand to std::shuffle.
+        for (size_t i = musterCount; i > 1; --i)
+            std::swap(order[i - 1], order[urand(0, (uint32)i - 1)]);
+
+        struct Candidate { TravelMuster const* m; TravelDest const* d; };
+        std::vector<Candidate> viable;
+
+        for (size_t mi : order)
+        {
+            TravelMuster const& m = kMusters[mi];
+
+            // One pass over the bot pool per muster, bucketed by level, instead of one pass per
+            // (muster, destination) pair - 4 passes rather than ~150.
+            uint32 perLevel[81] = {0};
+            for (auto const& itr : GetAllBots())
+            {
+                Player* bot = itr.second;
+                if (!IsTravelEligible(bot) || !IsRandomBot(bot))
+                    continue;
+                if ((m.team == 2 && bot->GetTeam() != ALLIANCE) ||
+                    (m.team == 4 && bot->GetTeam() != HORDE))
+                    continue;
+                uint32 const lvl = bot->GetLevel();
+                if (lvl <= 80)
+                    ++perLevel[lvl];
+            }
+
+            for (TravelDest const& d : kTravelDests)
+            {
+                if (d.map != m.map)
+                    continue;
+                // reqLevel above the cap is content nobody on this core can enter (Grim Batol, 61).
+                if (d.reqLevel > MAX_TRAVEL_DEST_LEVEL)
+                    continue;
+                uint32 have = 0;
+                for (uint32 l = d.minLevel; l <= d.maxLevel && l <= 80; ++l)
+                    have += perLevel[l];
+                if (have >= 2)
+                    viable.push_back({ &m, &d });
+            }
+
+            if (!viable.empty())
+                break;   // this muster can field a party; no need to look at the others
+        }
+
+        if (viable.empty())
+        {
+            sLog.outError("F2: registry mode found no destination with enough eligible bots");
+            return "";
+        }
+
+        Candidate const& pick = viable[urand(0, viable.size() - 1)];
+        muster = WorldLocation(pick.m->map, pick.m->x, pick.m->y, pick.m->z);
+        dest = WorldLocation(pick.d->map, pick.d->x, pick.d->y, pick.d->z);
+        forcedTeam = pick.m->team;
+        bandMin = pick.d->minLevel;
+        bandMax = pick.d->maxLevel;
+        destName = pick.d->name;
+
+        F2Log("SELECTED " + destName + " (trigger " + std::to_string(pick.d->trigger) + ", req " +
+              std::to_string((uint32)pick.d->reqLevel) + ") from " + pick.m->name +
+              " band " + std::to_string(bandMin) + "-" + std::to_string(bandMax));
+    }
+    else if (!ParseTravelPoint(sPlayerbotAIConfig.travelPartyMuster, muster) ||
+             !ParseTravelPoint(sPlayerbotAIConfig.travelPartyDest, dest))
     {
         sLog.outError("F2: TravelPartyMuster/TravelPartyDest must be \"map,x,y,z\"");
         return "";
@@ -3667,9 +3797,17 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
     // Recruit from the faction that owns the muster point's zone (2 = Alliance, 4 = Horde in
     // AreaTable, anything else contested -> take either). Keeps the coordinates and the
     // faction filter from drifting apart when the config points somewhere else.
-    uint32 musterZone = sTerrainMgr.GetZoneId(muster.mapId, muster.x, muster.y, muster.z);
-    AreaTableEntry const* musterArea = GetAreaEntryByAreaID(musterZone);
-    uint32 territory = musterArea ? musterArea->team : 0;
+    //
+    // Registry mode carries `team` on the muster row instead, because deriving it only works while
+    // the muster sits in its own faction's home zone - true for all four today, but a silent trap
+    // the moment one is moved somewhere contested.
+    uint32 territory = forcedTeam;
+    if (!territory)
+    {
+        uint32 musterZone = sTerrainMgr.GetZoneId(muster.mapId, muster.x, muster.y, muster.z);
+        AreaTableEntry const* musterArea = GetAreaEntryByAreaID(musterZone);
+        territory = musterArea ? musterArea->team : 0;
+    }
 
     uint32 const want = std::min<uint32>(sPlayerbotAIConfig.travelPartyDungeonSize, 5);
 
@@ -3690,16 +3828,9 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
             continue;
         if (territory == 4 && bot->GetTeam() != HORDE)
             continue;
-        if (bot->GetLevel() < sPlayerbotAIConfig.travelPartyMinLevel ||
-            bot->GetLevel() > sPlayerbotAIConfig.travelPartyMaxLevel)
+        if (bot->GetLevel() < bandMin || bot->GetLevel() > bandMax)
             continue;
-        if (bot->GetGroup() || bot->IsInCombat())
-            continue;
-        if (bot->InBattleGround() || bot->InBattleGroundQueue())
-            continue;
-        if (bot->IsBeingTeleported() || bot->IsTaxiFlying())
-            continue;
-        if (!GetBotAI(bot))
+        if (!IsTravelEligible(bot))
             continue;
 
         picked.push_back(bot);
@@ -3710,6 +3841,12 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
         sLog.outError("F2: not enough eligible bots for a travel party (%u found)", (uint32)picked.size());
         return "";
     }
+
+    // G13: the leader used to be picked.front(), an arbitrary bot in the band. Take the
+    // highest-level member instead - it is the one most likely to survive the road, and it stops
+    // a level 7 leading a party through zones that will kill it.
+    std::sort(picked.begin(), picked.end(),
+              [](Player* a, Player* b) { return a->GetLevel() > b->GetLevel(); });
 
     Player* leader = picked.front();
     PlayerbotAI* leaderAI = GetBotAI(leader);

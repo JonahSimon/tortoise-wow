@@ -150,6 +150,7 @@ public:
     uint32 travelPartyDungeonSize;
     uint32 travelPartyMoveMode;
     float travelPartyArriveZ;
+    bool travelPartyUseRegistry;
     std::string travelPartyLeaderStrip;
     // "map,x,y,z" strings: where the party musters and where it marches to. Config, not
     // constants, because both need tuning against this map in-game and a rebuild is ~20 min.

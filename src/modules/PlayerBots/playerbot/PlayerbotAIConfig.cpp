@@ -277,6 +277,11 @@ bool PlayerbotAIConfig::Initialize()
     // (z -200) and Sunken Temple (z -108) are still untested; if either needs more, raise this
     // via AI_TRAVEL_PARTY_ARRIVE_Z before adding a column.
     travelPartyArriveZ = config.GetFloatDefault("AiPlayerbot.TravelPartyArriveZ", 150.0f);
+    // Destination-first selection against TravelDestinations.h instead of the single hand-set
+    // TravelPartyMuster/TravelPartyDest pair. Default OFF: every existing test recipe and the live
+    // .env drive the config pair, and the standing rule for this port is that new behaviour ships
+    // disabled until it has been watched working.
+    travelPartyUseRegistry = config.GetBoolDefault("AiPlayerbot.TravelPartyUseRegistry", false);
     // Which strategies the march takes off the leader.
     //
     // `loot` is the one that matters, and it was missing for the whole port. Read off the leader's
