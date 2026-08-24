@@ -31,7 +31,7 @@
 #include "Transports/Transport.h"
 #include "Maps/PathFinder.h"
 #include "Group/Group.h"
-#include "Movement/MoveSpline.h"
+#include "Movement/spline/MoveSpline.h"
 #include "Movement/MotionMaster.h"
 
 #include <fstream>
