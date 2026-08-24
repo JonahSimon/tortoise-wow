@@ -270,16 +270,27 @@ bool PlayerbotAIConfig::Initialize()
     travelPartyMoveMode = config.GetIntDefault("AiPlayerbot.TravelPartyMoveMode", 1);
     // Which strategies the march takes off the leader.
     //
-    // `wander` is the one that matters and it was missing for the whole port. AiFactory gives a
-    // masterless random bot `follow|wander`; the party leader has no master, so it gets `wander`,
-    // which picks its own nearby destination every couple of seconds and cancels the march spline.
-    // Bisected 2026-08-23 by median seconds between re-paths on the same level 7 leader:
-    //   -travel,-grind,-rpg                     -> 2.0 s   (wedges, never arrives)
-    //   the same plus 15 movement-capable ones  -> 24.0 s
-    //   the same plus -wander alone             -> 23.0 s
-    // So wander accounts for the entire effect and the other fourteen contribute nothing
-    // measurable. Env-tunable because that bisection wants to stay one env change, not one build.
-    travelPartyLeaderStrip = config.GetStringDefault("AiPlayerbot.TravelPartyLeaderStrip", "-travel,-grind,-rpg,-wander");
+    // `loot` is the one that matters, and it was missing for the whole port. Read off the leader's
+    // own action queue (Engine::GetLastAction) at the wedge, on every single sample:
+    //   |PUSH:move to loot - 7.000000 (trigger)|T:far from current loot| ... |A:move to loot - OK
+    // "OK" means it EXECUTED. `move to loot` is LootNonCombatStrategy at relevance 7.0
+    // (LootNonCombatStrategy.cpp:15). It walks the bot back toward a corpse, cancelling the march
+    // spline; the march then drags the bot away again, which keeps `far from loot target` true, so
+    // it re-fires forever. March pulls toward the dungeon, loot pulls back to the body. Deadlock.
+    // `gather` is stripped with it because `add gathering loot` feeds the same loot list.
+    //
+    // ⚠️ This supersedes the earlier `-wander` claim, which was WRONG. `wander`'s triggers do fire
+    // for a masterless leader, but the queue shows every one of its actions coming back
+    // "A:follow - USELESS" / "A:check mount state - USELESS" and the tick ending in
+    // "no actions executed". The bisection that blamed it compared one wedged run against two runs
+    // that happened not to wedge (n=4 and n=5 gaps); the wide-strip arm that did work contained
+    // -loot. Correlation, not cause.
+    //
+    // This is also why the wedge looked level-correlated: a low-level party fights constantly, and
+    // every kill leaves a corpse that becomes a loot target. A level 36 leader walking the same
+    // road barely fights, so no loot target ever appears. It matches every run on record - the
+    // phase7c door wedge began one second after COMBAT end, which was misread as daze at the time.
+    travelPartyLeaderStrip = config.GetStringDefault("AiPlayerbot.TravelPartyLeaderStrip", "-travel,-grind,-rpg,-loot,-gather");
     // Defaults are Turtle's own game_tele rows: `orgrimmarentrance` -> the Wailing Caverns
     // ravine (the WC portal itself sits at -731,-2218,17 per game_tele/areatrigger_teleport,
     // deep inside the cave; the party stops at the outdoor mouth).

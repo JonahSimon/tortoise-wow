@@ -4249,12 +4249,12 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                   << " active=" << lAI->AllowActivity(ALL_ACTIVITY, true)
                   << " groupSpread=" << (int)p.maxMemberDist
                   << " lvl=" << leader->GetLevel() << " cls=" << (uint32)leader->getClass()
-                  // The last action the leader's OWN engine ran. Static reading of WanderStrategy
-                  // said only `wander near` -> `stop follow` could be active, and that
-                  // StopFollowAction::isUseful() gates on FOLLOW_MOTION_TYPE so it could never
-                  // fire during a POINT-driven march - yet stripping `wander` changed the median
-                  // re-path from 2.0 s to 23 s. The measurement wins, so name the action instead
-                  // of reasoning about it.
+                  // The last action the leader's OWN engine ran. This is the field that found
+                  // G1's real cause: at every wedge it reads
+                  //   |PUSH:move to loot - 7.000000 (trigger)|T:far from current loot|...
+                  //   |A:move to loot - OK
+                  // "OK" = executed. Keep it - two wrong theories (mount, then wander) both died
+                  // the moment the queue was printed instead of reasoned about.
                   << " lastAct=" << (lAI->GetCurrentEngine() ? lAI->GetCurrentEngine()->GetLastAction() : "<no engine>");
                 // Every non-combat strategy still live on the leader. The march only removes
                 // TravelPartyLeaderStrip; everything else here runs its own actions every tick and
