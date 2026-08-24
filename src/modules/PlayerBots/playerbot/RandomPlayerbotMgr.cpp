@@ -3833,15 +3833,14 @@ void RandomPlayerbotMgr::UpdateTravelParties()
         // correctly returned PATHFIND_NOPATH for the last 80 yd. A 3D check calls that a failure
         // at 81 yd; by any useful reading the party is at the door.
         //
-        // 20 yd horizontal keeps the old tightness where it means something. 100 yd vertical
-        // covers a cliff-top-above-a-cave-mouth without being unbounded - the drop here is 80 yd
-        // and the deepest entrance in the registry (Black Morass, z=-200) sits in a canyon of
-        // similar order. ponytail: two constants, not a per-entrance tolerance column; add one to
-        // [[dungeon-entrances]] only if a real door needs it.
+        // Blackfathom Deeps proved 100 yd was not enough: that party finished at (4252,756,92)
+        // against a door at (4252.37,756.97,-23.06) - 2D distance ZERO, 115 yd of pure Z - and was
+        // still called a failure. The vertical slack is now TravelPartyArriveZ (default 150).
         else if (leader->GetDistance2dToCenter(p.destX, p.destY) <= 20.f &&
-                 std::fabs(leader->GetPositionZ() - p.destZ) <= 100.f)
+                 std::fabs(leader->GetPositionZ() - p.destZ) <= sPlayerbotAIConfig.travelPartyArriveZ)
         {
-            F2Log("ARRIVED (2D<=20, dZ<=100) -> disband");
+            F2Log("ARRIVED (2D<=20, dZ<=" +
+                  std::to_string((int)sPlayerbotAIConfig.travelPartyArriveZ) + ") -> disband");
             sLog.outString("F2: travel party reached the destination; disbanding.");
             done = true;
         }

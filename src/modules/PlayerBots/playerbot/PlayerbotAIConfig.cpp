@@ -268,6 +268,15 @@ bool PlayerbotAIConfig::Initialize()
     travelPartyTestMode = config.GetBoolDefault("AiPlayerbot.TravelPartyTestMode", false);
     travelPartyDungeonSize = config.GetIntDefault("AiPlayerbot.TravelPartyDungeonSize", 5);
     travelPartyMoveMode = config.GetIntDefault("AiPlayerbot.TravelPartyMoveMode", 1);
+    // Vertical slack on the arrival test. Horizontal is a tight 20 yd; this is deliberately loose
+    // because a party that reaches a cave entrance often ends up on the cliff DIRECTLY above it,
+    // with the descent unmeshed. Measured 2026-08-23, in both cases 2D distance was ~0:
+    //   Wailing Caverns   (trigger 228)  dZ  80
+    //   Blackfathom Deeps (trigger 257)  dZ 115   <- the reason this is 150, not 100
+    // ponytail: one global constant, not a per-entrance column in the registry. Black Morass
+    // (z -200) and Sunken Temple (z -108) are still untested; if either needs more, raise this
+    // via AI_TRAVEL_PARTY_ARRIVE_Z before adding a column.
+    travelPartyArriveZ = config.GetFloatDefault("AiPlayerbot.TravelPartyArriveZ", 150.0f);
     // Which strategies the march takes off the leader.
     //
     // `loot` is the one that matters, and it was missing for the whole port. Read off the leader's
