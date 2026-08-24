@@ -3762,7 +3762,7 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
     // forced travel target only to stop its own "travel" strategy from picking a different
     // destination, and the actual walking was MovePoint there too. Strip the autonomous
     // strategies instead; one less pair of owned pointers to leak on disband.
-    leaderAI->ChangeStrategy("-travel,-grind,-rpg", BotState::BOT_STATE_NON_COMBAT);
+    leaderAI->ChangeStrategy(sPlayerbotAIConfig.travelPartyLeaderStrip, BotState::BOT_STATE_NON_COMBAT);
 
     // Distance-proportional hard timeout. The flat 900 s was already tight: the 3300 yd
     // Org->Wailing Caverns route took ~10 min *with a mount*. The stall detector below is the
@@ -3838,11 +3838,28 @@ void RandomPlayerbotMgr::UpdateTravelParties()
             if (!leader->IsBeingTeleported())
             {
                 // Random-bot management re-adds the autonomous strategies, which would pick
-                // their own destination and undo the march, so re-strip them every tick.
-                if (lAI->HasStrategy("grind", BotState::BOT_STATE_NON_COMBAT) ||
-                    lAI->HasStrategy("rpg", BotState::BOT_STATE_NON_COMBAT) ||
-                    lAI->HasStrategy("travel", BotState::BOT_STATE_NON_COMBAT))
-                    lAI->ChangeStrategy("-travel,-grind,-rpg", BotState::BOT_STATE_NON_COMBAT);
+                // their own destination and undo the march, so re-strip them every tick. The
+                // guard reads the configured list rather than a hard-coded trio, otherwise
+                // widening TravelPartyLeaderStrip would strip once at spawn and never again.
+                {
+                    bool needStrip = false;
+                    std::string const& strip = sPlayerbotAIConfig.travelPartyLeaderStrip;
+                    size_t i = 0;
+                    while (i < strip.size() && !needStrip)
+                    {
+                        size_t const comma = strip.find(',', i);
+                        std::string tok = strip.substr(i, comma == std::string::npos ? std::string::npos : comma - i);
+                        i = (comma == std::string::npos) ? strip.size() : comma + 1;
+                        while (!tok.empty() && (tok.front() == ' ' || tok.front() == '-' || tok.front() == '+'))
+                            tok.erase(tok.begin());
+                        while (!tok.empty() && tok.back() == ' ')
+                            tok.pop_back();
+                        if (!tok.empty() && lAI->HasStrategy(tok, BotState::BOT_STATE_NON_COMBAT))
+                            needStrip = true;
+                    }
+                    if (needStrip)
+                        lAI->ChangeStrategy(strip, BotState::BOT_STATE_NON_COMBAT);
+                }
 
                 float const lx = leader->GetPositionX();
                 float const ly = leader->GetPositionY();
@@ -4208,7 +4225,15 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                   << " best " << (int)p.bestDist
                   << " moving=" << leader->IsMoving()
                   << " active=" << lAI->AllowActivity(ALL_ACTIVITY, true)
-                  << " groupSpread=" << (int)p.maxMemberDist;
+                  << " groupSpread=" << (int)p.maxMemberDist
+                  << " lvl=" << leader->GetLevel() << " cls=" << (uint32)leader->getClass();
+                // Every non-combat strategy still live on the leader. The march only removes
+                // TravelPartyLeaderStrip; everything else here runs its own actions every tick and
+                // can cancel the march spline. Printed so the "who is stopping the leader"
+                // bisection can be read off a log instead of guessed at.
+                o << " strat=";
+                for (auto const& sv : lAI->GetStrategies(BotState::BOT_STATE_NON_COMBAT))
+                    o << sv << "|";
                 F2Log(o.str());
             }
         }

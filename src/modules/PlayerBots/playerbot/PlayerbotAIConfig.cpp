@@ -268,6 +268,9 @@ bool PlayerbotAIConfig::Initialize()
     travelPartyTestMode = config.GetBoolDefault("AiPlayerbot.TravelPartyTestMode", false);
     travelPartyDungeonSize = config.GetIntDefault("AiPlayerbot.TravelPartyDungeonSize", 5);
     travelPartyMoveMode = config.GetIntDefault("AiPlayerbot.TravelPartyMoveMode", 1);
+    // Which strategies the march takes off the leader. Env-tunable so the "who is
+    // cancelling the spline" bisection needs one build, not one per candidate.
+    travelPartyLeaderStrip = config.GetStringDefault("AiPlayerbot.TravelPartyLeaderStrip", "-travel,-grind,-rpg");
     // Defaults are Turtle's own game_tele rows: `orgrimmarentrance` -> the Wailing Caverns
     // ravine (the WC portal itself sits at -731,-2218,17 per game_tele/areatrigger_teleport,
     // deep inside the cave; the party stops at the outdoor mouth).
