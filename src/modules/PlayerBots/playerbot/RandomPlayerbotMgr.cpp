@@ -31,6 +31,8 @@
 #include "Transports/Transport.h"
 #include "Maps/PathFinder.h"
 #include "Group/Group.h"
+#include "Movement/MoveSpline.h"
+#include "Movement/MotionMaster.h"
 
 #include <fstream>
 #include <cmath>
@@ -3527,9 +3529,37 @@ namespace
 // So the only honest test of a mover is ground covered, which the caller tracks across orders.
 // Log codes: T = MoveTo took it, S = MoveTo claimed success but issued no movement, F = MoveTo
 // declined, P = MoveTo demoted for not delivering, raw MovePoint driving.
+// The "raw MovePoint" fallback below was never raw. `FORCED_MOVEMENT_RUN` is a cmangos symbol
+// that this fork's compat shim defines as `1` (cmangos-compat-shim.h:647, comment: "bot only
+// checks symbolic value"). That is true everywhere else, but here the value is handed straight to
+// the *core's* MotionMaster::MovePoint(id, x, y, z, uint32 options, ...), whose `options` is a
+// MoveOptions bitmask - and `1` is MOVE_PATHFINDING (MotionMaster.h:72). So every "raw" order
+// silently ran a SECOND, independent navmesh query (MoveSplineInit.h:124) on top of the one F2
+// had just done to choose the waypoint, and threw F2's path away. It also never set
+// MOVE_RUN_MODE, so walk/run was left to the spline default.
+//
+// TravelPartyMoveMode picks the mover so the three can be compared without a rebuild:
+//   0 = as shipped: MovePoint with the accidental MOVE_PATHFINDING (the control)
+//   1 = MovePoint with the flags actually intended: MOVE_PATHFINDING | MOVE_RUN_MODE
+//   2 = MovePath along the path F2 already computed - one query, nothing to disagree with
 static char IssueMove(Player* leader, PlayerbotAI* lAI, uint32 mapId, float x, float y, float z,
-                      bool forceRaw)
+                      bool forceRaw, Movement::PointsArray const& f2Path)
 {
+    uint32 const mode = sPlayerbotAIConfig.travelPartyMoveMode;
+
+    auto issueRaw = [&]()
+    {
+        // Mode 2 needs at least a start and an end, and MoveSplineInit rewrites vertex 0 to the
+        // live position, so a 2-point path is the minimum useful one.
+        if (mode == 2 && f2Path.size() > 1)
+        {
+            leader->GetMotionMaster()->MovePath(f2Path, 0, false, false);
+            return;
+        }
+        uint32 const opts = (mode >= 1) ? (MOVE_PATHFINDING | MOVE_RUN_MODE) : FORCED_MOVEMENT_RUN;
+        leader->GetMotionMaster()->MovePoint(990001, x, y, z, opts);
+    };
+
     // ignoreEnemyTargets: ClipPath otherwise truncates the path just short of any hostile in
     // aggro range, so the leader stops a few yards away, never pulls, and re-paths there forever
     // - the (826,-3869) deadlock. Walking in and taking the fight is the intended behaviour now
@@ -3538,12 +3568,35 @@ static char IssueMove(Player* leader, PlayerbotAI* lAI, uint32 mapId, float x, f
     {
         if (leader->IsMoving())
             return 'T';
-        leader->GetMotionMaster()->MovePoint(990001, x, y, z, FORCED_MOVEMENT_RUN);
+        issueRaw();
         return 'S';
     }
 
-    leader->GetMotionMaster()->MovePoint(990001, x, y, z, FORCED_MOVEMENT_RUN);
+    issueRaw();
     return forceRaw ? 'P' : 'F';
+}
+
+// What actually reached the spline, read back from the unit right after the order was issued.
+// Deliberately multi-valued and printed unconditionally: "the order produced no spline" and
+// "this instrument never ran" must not look alike. spl=1 means movespline is already finalized,
+// i.e. nothing is moving; splD is how far the issued move will actually travel.
+static std::string F2SplineState(Player* leader)
+{
+    std::ostringstream o;
+    bool const fin = leader->movespline->Finalized();
+    o << " spl=" << (fin ? 1 : 0);
+    if (fin)
+        o << " splD=-1";
+    else
+    {
+        Vector3 const d = leader->movespline->FinalDestination();
+        o << " splD=" << (int)leader->GetDistance3dToCenter(d.x, d.y, d.z);
+    }
+    o << " ust=" << std::hex << (uint32)(leader->GetUnitState() &
+        (UNIT_STAT_ROOT | UNIT_STAT_STUNNED | UNIT_STAT_CONFUSED | UNIT_STAT_FLEEING |
+         UNIT_STAT_FEIGN_DEATH | UNIT_STAT_DISTRACTED | UNIT_STAT_TAXI_FLIGHT |
+         UNIT_STAT_IGNORE_PATHFINDING)) << std::dec;
+    return o.str();
 }
 
 static void F2Log(std::string const& line)
@@ -3958,6 +4011,11 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                     p.lastOrderY = ly;
                     p.lastOrderSet = true;
 
+                    // Keep the navmesh path that chose the waypoint. Mode 2 walks this array
+                    // directly instead of letting MovePoint run a second query for it, and the
+                    // point count goes in the telemetry so a collapsed path is visible.
+                    Movement::PointsArray chosenPath;
+
                     // Take the first REAL navmesh path (NORMAL or INCOMPLETE, and none of
                     // NOPATH/SHORTCUT/NOT_USING_PATH, which mean "straight line through terrain").
                     auto tryTarget = [&](float tgx, float tgy, float tgz) -> bool
@@ -4001,6 +4059,15 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                         endX = end.x;
                         endY = end.y;
                         endZ = end.z;
+                        // Trim to the part we actually committed to, so mode 2 walks exactly the
+                        // hop the waypoint describes rather than the whole 900 yd path.
+                        chosenPath.clear();
+                        for (auto const& node : g.getPath())
+                        {
+                            chosenPath.push_back(node);
+                            if (node.x == end.x && node.y == end.y && node.z == end.z)
+                                break;
+                        }
                         return true;
                     };
 
@@ -4061,7 +4128,7 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                         p.curTgtY = endY;
                         p.curTgtZ = endZ;
                         p.curTgtSet = true;
-                        moveCode = IssueMove(leader, lAI, p.mapId, endX, endY, endZ, p.forceRawMove);
+                        moveCode = IssueMove(leader, lAI, p.mapId, endX, endY, endZ, p.forceRawMove, chosenPath);
                     }
                     else
                     {
@@ -4072,12 +4139,30 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                         float const step = std::min(10.0f, flat);
                         float const nx = (flat > 1.0f) ? lx + dx / flat * step : p.destX;
                         float const ny = (flat > 1.0f) ? ly + dy / flat * step : p.destY;
-                        moveCode = IssueMove(leader, lAI, p.mapId, nx, ny, lz, p.forceRawMove);
+                        chosenPath.clear();  // the nudge has no path behind it; mode 2 falls back to MovePoint
+                        moveCode = IssueMove(leader, lAI, p.mapId, nx, ny, lz, p.forceRawMove, chosenPath);
+                    }
+
+                    // p1 = points in the path F2 chose the waypoint from. p2 = points in a second
+                    // PathFinder run to that same waypoint, which is exactly the query
+                    // MoveSplineInit performs internally for a MOVE_PATHFINDING order. If p1 is
+                    // healthy and p2 collapses to 0/1, the two queries disagree and the second one
+                    // is what strands the leader - the whole point of this instrument.
+                    int p2 = -1;
+                    if (usable)
+                    {
+                        PathFinder v(leader);
+                        v.calculate(endX, endY, endZ);
+                        p2 = (int)v.getPath().size();
                     }
 
                     std::ostringstream o;
                     o << "PATH type=" << (uint32)ptype << " usable=" << usable
                       << " mv=" << moveCode << " keep=" << (keptTgt ? 1 : 0)
+                      << " mode=" << sPlayerbotAIConfig.travelPartyMoveMode
+                      << " p1=" << (int)chosenPath.size() << " p2=" << p2
+                      << " toTgt=" << (usable ? (int)leader->GetDistance3dToCenter(endX, endY, endZ) : -1)
+                      << F2SplineState(leader)
                       << " remaining=" << (int)leader->GetDistance2dToCenter(p.destX, p.destY)
                       << " mounted=" << leader->IsMounted() << " inWater=" << leader->IsInWater();
                     F2Log(o.str());
