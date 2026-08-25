@@ -683,11 +683,20 @@ void RandomPlayerbotMgr::UpdateAIInternal(uint32 elapsed, bool minimal)
     if (sPlayerbotAIConfig.travelParties)
     {
         UpdateTravelParties();
-        if (sPlayerbotAIConfig.travelPartyTestMode)
+        // Parties used to auto-form ONLY in test mode, so a live server with TravelParties=1 and
+        // test mode off never formed a single one - the sole other caller is the GM command
+        // `.rndbot travelparty`. That made the whole feature invisible in normal play, which is
+        // the opposite of the point: these marches exist to make the world look inhabited.
+        //
+        // TravelPartySpawnInterval is the live cadence. Test mode keeps its fixed 60 s so every
+        // recorded test recipe reproduces unchanged. The concurrency cap is what actually bounds
+        // the population; this only sets how fast a freed slot is refilled.
+        uint32 const spawnEvery = sPlayerbotAIConfig.travelPartyTestMode
+                                      ? 60 : sPlayerbotAIConfig.travelPartySpawnInterval;
+        if (spawnEvery)
         {
             uint32 now = (uint32)time(nullptr);
-            // ponytail: fixed 60s test cadence; add a config key if it ever needs tuning.
-            if (now - _travelPartyTime >= 60)
+            if (now - _travelPartyTime >= spawnEvery)
             {
                 _travelPartyTime = now;
                 SpawnTravelParty();

@@ -152,6 +152,7 @@ public:
     float travelPartyArriveZ;
     bool travelPartyUseRegistry;
     uint32 travelPartyMaxConcurrent;
+    uint32 travelPartySpawnInterval;
     uint32 travelPartyMaxDeaths;
     bool travelPartyEnterInstance;
     std::string travelPartyLeaderStrip;

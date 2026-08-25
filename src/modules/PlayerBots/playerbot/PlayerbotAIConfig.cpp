@@ -286,9 +286,17 @@ bool PlayerbotAIConfig::Initialize()
     // "once a walk has been watched end to end" - which G1's fix delivered. 3 is deliberately
     // modest: 3 parties x 5 bots is 15 of a 1000-bot pool, and every extra party is another
     // independent sample per wall-clock minute, which is what makes the remaining gaps testable.
-    travelPartyMaxConcurrent = config.GetIntDefault("AiPlayerbot.TravelPartyMaxConcurrent", 3);
+    // How many marches run at once. 3 was chosen while this was a TEST instrument, where the goal
+    // was readable telemetry. The goal is a world that looks inhabited, and 3 parties (15 bots) in
+    // a 1000-bot pool is invisible to a player standing on a road. 10 parties is 50 bots, ~5% of
+    // the pool, which reads as traffic without gutting the grind population. Tune from .env.
+    travelPartyMaxConcurrent = config.GetIntDefault("AiPlayerbot.TravelPartyMaxConcurrent", 10);
     if (travelPartyMaxConcurrent < 1)
         travelPartyMaxConcurrent = 1;
+    // Seconds between attempts to fill a free party slot outside test mode. 0 disables auto-forming
+    // entirely, leaving only the GM command - which was the ONLY behaviour before this key existed,
+    // and the reason a live server with TravelParties=1 never produced a single march.
+    travelPartySpawnInterval = config.GetIntDefault("AiPlayerbot.TravelPartySpawnInterval", 60);
     // G6: how many times the LEADER may die and be revived before the march is abandoned.
     // 0 restores the old behaviour (any death disbands). 3 is the honest middle: a party crossing
     // the Barrens on-level will lose a fight now and then and should carry on, but a party being
