@@ -3707,6 +3707,7 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
     uint32 bandMin = sPlayerbotAIConfig.travelPartyMinLevel;
     uint32 bandMax = sPlayerbotAIConfig.travelPartyMaxLevel;
     std::string destName;
+    TravelDest const* pickedDest = nullptr;   // registry rows only; carries the inside door (G5b)
 
     if (sPlayerbotAIConfig.travelPartyUseRegistry)
     {
@@ -3834,6 +3835,7 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
         bandMin = pick.d->minLevel;
         bandMax = pick.d->maxLevel;
         destName = pick.d->name;
+        pickedDest = pick.d;
 
         F2Log("SELECTED " + destName + " (trigger " + std::to_string(pick.d->trigger) + ", req " +
               std::to_string((uint32)pick.d->reqLevel) + ") from " + pick.m->name +
@@ -3931,6 +3933,17 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
     party.destX = dest.x;
     party.destY = dest.y;
     party.destZ = dest.z;
+    party.destName = destName;
+    // Raids are marched to but never entered: the door is a legitimate destination, five bots in
+    // Molten Core is not. Leaving insideMap at 0 is the whole gate - the arrival branch reads it.
+    if (pickedDest && !pickedDest->isRaid)
+    {
+        party.insideMap = pickedDest->inMap;
+        party.insideX = pickedDest->inX;
+        party.insideY = pickedDest->inY;
+        party.insideZ = pickedDest->inZ;
+        party.insideO = pickedDest->inO;
+    }
 
     for (size_t i = 1; i < picked.size(); ++i)
     {
@@ -4004,6 +4017,38 @@ void RandomPlayerbotMgr::UpdateTravelParties()
         Player* leader = sObjectMgr.GetPlayer(p.leaderGuid);
 
         bool done = false;
+        // G5b: the teleports are already away; this party is not marching any more. A far
+        // TeleportTo is asynchronous, so wait for every bot to land on the instance map before
+        // disbanding - disband first and each bot walks through the door alone, binding to its own
+        // copy of the dungeon instead of the party's. Bounded, because a bot that never lands must
+        // not hold a party slot forever.
+        if (p.enteringUntil)
+        {
+            uint32 inside = 0;
+            for (ObjectGuid const& guid : p.memberGuids)
+            {
+                Player* member = sObjectMgr.GetPlayer(guid);
+                if (member && member->IsInWorld() && !member->IsBeingTeleported() &&
+                    member->GetMapId() == p.insideMap)
+                    ++inside;
+            }
+
+            if (inside == (uint32)p.memberGuids.size() || now >= p.enteringUntil)
+            {
+                F2LogParty(p, "ENTERED " + p.destName + " map=" + std::to_string(p.insideMap) +
+                      " (" + std::to_string(inside) + "/" +
+                      std::to_string(p.memberGuids.size()) + " bots inside" +
+                      (inside == (uint32)p.memberGuids.size() ? "" : ", gave up waiting") +
+                      ") -> disband");
+                DisbandTravelParty(p);
+                it = _travelParties.erase(it);
+                continue;
+            }
+
+            ++it;
+            continue;
+        }
+
         // G6: the leader dying used to end the march. It is a setback, not the end - revive it
         // where it fell and carry on, up to TravelPartyMaxDeaths (default 3, 0 restores the old
         // behaviour). Bounded on purpose: a party being farmed by something it cannot beat has to
@@ -4076,10 +4121,43 @@ void RandomPlayerbotMgr::UpdateTravelParties()
         else if (leader->GetDistance2dToCenter(p.destX, p.destY) <= 20.f &&
                  std::fabs(leader->GetPositionZ() - p.destZ) <= sPlayerbotAIConfig.travelPartyArriveZ)
         {
-            F2LogParty(p, "ARRIVED (2D<=20, dZ<=" +
-                  std::to_string((int)sPlayerbotAIConfig.travelPartyArriveZ) + ") -> disband");
-            sLog.outString("F2: travel party reached the destination; disbanding.");
-            done = true;
+            // G5b: walking the last stretch is not an option for most doors - the descent is
+            // off the navmesh, which is why arrival is judged in 2D at all. Crossing the trigger
+            // is a teleport for a real player too, so do exactly what the trigger does: send the
+            // party to areatrigger_teleport's own target. The leader goes first so the group's
+            // instance binding is created by the leader, as it would be in a real run.
+            if (sPlayerbotAIConfig.travelPartyEnterInstance && p.insideMap)
+            {
+                F2LogParty(p, "ARRIVED (2D<=20, dZ<=" +
+                      std::to_string((int)sPlayerbotAIConfig.travelPartyArriveZ) +
+                      ") -> entering " + p.destName);
+
+                leader->TeleportTo(p.insideMap, p.insideX, p.insideY, p.insideZ, p.insideO);
+                for (ObjectGuid const& guid : p.memberGuids)
+                {
+                    if (guid == p.leaderGuid)
+                        continue;
+                    Player* member = sObjectMgr.GetPlayer(guid);
+                    if (!member || !member->IsInWorld())
+                        continue;
+                    if (!member->IsAlive())
+                    {
+                        member->ResurrectPlayer(1.0f);
+                        member->SpawnCorpseBones();
+                    }
+                    member->TeleportTo(p.insideMap, p.insideX + frand(-3.f, 3.f),
+                                       p.insideY + frand(-3.f, 3.f), p.insideZ, p.insideO);
+                }
+
+                p.enteringUntil = now + 60;   // ponytail: fixed wait, not a per-bot state machine
+            }
+            else
+            {
+                F2LogParty(p, "ARRIVED (2D<=20, dZ<=" +
+                      std::to_string((int)sPlayerbotAIConfig.travelPartyArriveZ) + ") -> disband");
+                sLog.outString("F2: travel party reached the destination; disbanding.");
+                done = true;
+            }
         }
         else if (PlayerbotAI* lAI = GetBotAI(leader))
         {

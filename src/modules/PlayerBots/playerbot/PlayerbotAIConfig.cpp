@@ -294,6 +294,13 @@ bool PlayerbotAIConfig::Initialize()
     // the Barrens on-level will lose a fight now and then and should carry on, but a party being
     // farmed by something it cannot beat should stop and say so rather than revive forever.
     travelPartyMaxDeaths = config.GetIntDefault("AiPlayerbot.TravelPartyMaxDeaths", 3);
+    // G5b: on arrival, cross the door instead of standing outside it. The party is teleported to
+    // areatrigger_teleport's own target - the same landing spot a player gets for walking through
+    // the trigger - because the last stretch of most entrances is not on the navmesh at all
+    // (Wailing Caverns arrives 80 yd above the cave mouth by design; see TravelPartyArriveZ).
+    // Registry mode only: the hand-set TravelPartyDest is a bare coordinate with no instance
+    // behind it. Default OFF, per the standing rule that new behaviour ships disabled.
+    travelPartyEnterInstance = config.GetBoolDefault("AiPlayerbot.TravelPartyEnterInstance", false);
     // Which strategies the march takes off the leader.
     //
     // `loot` is the one that matters, and it was missing for the whole port. Read off the leader's

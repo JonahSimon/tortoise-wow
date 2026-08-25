@@ -301,6 +301,16 @@ public:
             // while a leader dying repeatedly means the party is walking into something it
             // cannot survive and should give up with a verdict rather than a revive loop.
             uint8 leaderDeaths = 0;
+            // G5b: where crossing this door puts a player, straight out of areatrigger_teleport.
+            // 0 = no instance behind this destination (the hand-set TravelPartyDest path), so the
+            // party stops at the door as before.
+            uint32 insideMap = 0;
+            float insideX = 0.f, insideY = 0.f, insideZ = 0.f, insideO = 0.f;
+            std::string destName;      // for the ENTERED line; SELECTED is far up the log by then
+            // Entering is not instant: TeleportTo across maps is asynchronous, and the group has
+            // to survive until every bot is on the instance map or they bind to separate copies
+            // of it. Non-zero means "teleports issued, waiting"; the march logic is skipped.
+            uint32 enteringUntil = 0;
         };
         std::vector<TravelParty> _travelParties;
         uint32 _travelPartyTime = 0;
