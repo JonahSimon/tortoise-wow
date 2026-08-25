@@ -4004,7 +4004,41 @@ void RandomPlayerbotMgr::UpdateTravelParties()
         Player* leader = sObjectMgr.GetPlayer(p.leaderGuid);
 
         bool done = false;
-        if (!leader || !leader->IsInWorld() || !leader->IsAlive() || leader->GetMapId() != p.mapId)
+        // G6: the leader dying used to end the march. It is a setback, not the end - revive it
+        // where it fell and carry on, up to TravelPartyMaxDeaths (default 3, 0 restores the old
+        // behaviour). Bounded on purpose: a party being farmed by something it cannot beat has to
+        // stop and produce a verdict instead of reviving into the same mob forever.
+        //
+        // ResurrectPlayer + SpawnCorpseBones is the module's own revive, lifted verbatim from
+        // RandomPlayerbotMgr::Refresh. A marching bot is still a random bot; it does not need a
+        // second implementation. Refresh also calls ResetStrategies(), which is deliberately NOT
+        // copied here - that would hand the leader its `travel`/`grind`/`loot` strategies back
+        // mid-march, and re-stripping them is the thing G1 was.
+        if (leader && leader->IsInWorld() && !leader->IsAlive() &&
+            leader->GetMapId() == p.mapId && !leader->IsBeingTeleported() &&
+            p.leaderDeaths < sPlayerbotAIConfig.travelPartyMaxDeaths)
+        {
+            ++p.leaderDeaths;
+            leader->ResurrectPlayer(1.0f);
+            leader->SpawnCorpseBones();
+
+            F2LogParty(p, "LEADER DIED at " +
+                  std::to_string((int)leader->GetDistance3dToCenter(p.destX, p.destY, p.destZ)) +
+                  " yd out -> revived (" + std::to_string((int)p.leaderDeaths) + "/" +
+                  std::to_string(sPlayerbotAIConfig.travelPartyMaxDeaths) + ")");
+
+            // A corpse does not make progress, so the stall clock has been running against a bot
+            // that could not move. Reset it, drop the stale waypoint, and let the mover earn the
+            // wheel back rather than inheriting a demotion the death caused.
+            p.bestProgressTime = now;
+            p.curTgtSet = false;
+            p.lastOrderSet = false;
+            p.deadOrders = 0;
+            p.forceRawMove = false;
+            p.recoverUntil = now + 45;  // same eat-and-drink window a fight gets
+            p.deadline += 60;           // the death and the hold do not eat the travel budget
+        }
+        else if (!leader || !leader->IsInWorld() || !leader->IsAlive() || leader->GetMapId() != p.mapId)
         {
             // Say WHY. This used to tear down in silence, so a party that died mid-march looked
             // exactly like one that never formed - two "FORMED" lines in a row with no verdict
@@ -4013,7 +4047,8 @@ void RandomPlayerbotMgr::UpdateTravelParties()
             o << "LEADER LOST (";
             if (!leader)                       o << "no player object";
             else if (!leader->IsInWorld())     o << "not in world";
-            else if (!leader->IsAlive())       o << "dead at " << (int)leader->GetDistance3dToCenter(p.destX, p.destY, p.destZ) << " yd out";
+            else if (!leader->IsAlive())       o << "dead at " << (int)leader->GetDistance3dToCenter(p.destX, p.destY, p.destZ)
+                                                 << " yd out after " << (int)p.leaderDeaths << " revives";
             else                               o << "wrong map " << leader->GetMapId() << " != " << p.mapId;
             o << ") -> disband";
             F2LogParty(p, o.str());
@@ -4196,6 +4231,18 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                     Player* member = sObjectMgr.GetPlayer(mg);
                     if (!member || !member->IsInWorld())
                         continue;
+
+                    // G6: a dead follower is revived on the spot and costs the march nothing - the
+                    // straggler snap below puts it back with the group either way. Only the
+                    // LEADER's deaths count against TravelPartyMaxDeaths, because only the leader
+                    // dying repeatedly means the route itself is unsurvivable.
+                    if (!member->IsAlive() && !member->IsBeingTeleported() &&
+                        sPlayerbotAIConfig.travelPartyMaxDeaths > 0)
+                    {
+                        member->ResurrectPlayer(1.0f);
+                        member->SpawnCorpseBones();
+                        F2LogParty(p, "MEMBER DIED " + std::string(member->GetName()) + " -> revived");
+                    }
 
                     if (PlayerbotAI* mAI = GetBotAI(member))
                     {

@@ -289,6 +289,11 @@ bool PlayerbotAIConfig::Initialize()
     travelPartyMaxConcurrent = config.GetIntDefault("AiPlayerbot.TravelPartyMaxConcurrent", 3);
     if (travelPartyMaxConcurrent < 1)
         travelPartyMaxConcurrent = 1;
+    // G6: how many times the LEADER may die and be revived before the march is abandoned.
+    // 0 restores the old behaviour (any death disbands). 3 is the honest middle: a party crossing
+    // the Barrens on-level will lose a fight now and then and should carry on, but a party being
+    // farmed by something it cannot beat should stop and say so rather than revive forever.
+    travelPartyMaxDeaths = config.GetIntDefault("AiPlayerbot.TravelPartyMaxDeaths", 3);
     // Which strategies the march takes off the leader.
     //
     // `loot` is the one that matters, and it was missing for the whole port. Read off the leader's

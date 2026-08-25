@@ -296,6 +296,11 @@ public:
             bool inCombat = false;     // any member was fighting as of last tick
             uint32 combatStart = 0;    // unix time the current fight began
             uint32 recoverUntil = 0;   // hold here until this time so the crew can eat and drink
+            // G6: deaths are a setback, not the end of the march. Counted only for the LEADER,
+            // because a follower that dies is revived and snapped back at no cost to the route,
+            // while a leader dying repeatedly means the party is walking into something it
+            // cannot survive and should give up with a verdict rather than a revive loop.
+            uint8 leaderDeaths = 0;
         };
         std::vector<TravelParty> _travelParties;
         uint32 _travelPartyTime = 0;
