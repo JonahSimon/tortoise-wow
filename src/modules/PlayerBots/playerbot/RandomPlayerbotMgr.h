@@ -311,6 +311,13 @@ public:
             // to survive until every bot is on the instance map or they bind to separate copies
             // of it. Non-zero means "teleports issued, waiting"; the march logic is skipped.
             uint32 enteringUntil = 0;
+            // A pathfind that failed cannot succeed again 300 ms later from the same spot: the
+            // mesh does not change. The failure branch nudges 10 yd and leaves curTgtSet false,
+            // which re-fires the whole probe fan on the very next tick - measured at 35361 of
+            // 35686 failed pathfinds retrying within one second, ~566k wasted Detour queries in a
+            // 5 h soak. Hold off until the nudge has had time to land.
+            // ponytail: fixed 2 s, well under the 90 s stall detector so no verdict moves.
+            uint32 retryPathAfter = 0;
         };
         std::vector<TravelParty> _travelParties;
         uint32 _travelPartyTime = 0;

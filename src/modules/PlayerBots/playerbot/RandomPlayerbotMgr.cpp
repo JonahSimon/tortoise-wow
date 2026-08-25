@@ -4369,7 +4369,8 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                 // (or stopped short of) the current target - re-issuing MovePoint every tick
                 // restarts the spline, which is what makes bots run/stop/run.
                 float const toTgt = p.curTgtSet ? leader->GetDistance2dToCenter(p.curTgtX, p.curTgtY) : 1e9f;
-                if (!done && (!leader->IsMoving() || !p.curTgtSet || toTgt <= 12.f))
+                if (!done && now >= p.retryPathAfter &&
+                    (!leader->IsMoving() || !p.curTgtSet || toTgt <= 12.f))
                 {
                     // Instrument: a re-path every tick means the spline is being cancelled almost
                     // as fast as it is issued, and these three fields say by what. `why` is the
@@ -4525,12 +4526,14 @@ void RandomPlayerbotMgr::UpdateTravelParties()
                         p.curTgtY = endY;
                         p.curTgtZ = endZ;
                         p.curTgtSet = true;
+                        p.retryPathAfter = 0;
                         moveCode = IssueMove(leader, lAI, p.mapId, endX, endY, endZ, p.forceRawMove, chosenPath);
                     }
                     else
                     {
                         // Transient off-mesh spot: 10 yd nudge toward the destination and retry.
                         p.curTgtSet = false;
+                        p.retryPathAfter = now + 2;
                         float const dx = p.destX - lx, dy = p.destY - ly;
                         float const flat = sqrt(dx * dx + dy * dy);
                         float const step = std::min(10.0f, flat);
