@@ -150,6 +150,8 @@ public:
     uint32 travelPartyDungeonSize;
     uint32 travelPartyMoveMode;
     float travelPartyArriveZ;
+    float travelPartyLowLevelMaxRoute;
+    uint32 travelPartyLowLevelBand;
     bool travelPartyUseRegistry;
     uint32 travelPartyMaxConcurrent;
     uint32 travelPartySpawnInterval;

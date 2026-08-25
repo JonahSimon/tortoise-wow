@@ -3742,6 +3742,17 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
                         blocked += std::string(d.name) + "(cap) ";
                         continue;
                     }
+                    if (sPlayerbotAIConfig.travelPartyLowLevelMaxRoute > 0.f &&
+                        sPlayerbotAIConfig.travelPartyLowLevelBand > 0 &&
+                        d.maxLevel <= sPlayerbotAIConfig.travelPartyLowLevelBand)
+                    {
+                        float const rdx = d.x - m.x, rdy = d.y - m.y;
+                        if (sqrt(rdx * rdx + rdy * rdy) > sPlayerbotAIConfig.travelPartyLowLevelMaxRoute)
+                        {
+                            blocked += std::string(d.name) + "(low band, far route) ";
+                            continue;
+                        }
+                    }
                     AreaTableEntry const* a =
                         GetAreaEntryByAreaID(sTerrainMgr.GetZoneId(d.map, d.x, d.y, d.z));
                     if (a && (a->flags & AREA_FLAG_CAPITAL) && a->team && a->team != m.team)
@@ -3820,6 +3831,24 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
                         destArea->team != m.team)
                         continue;
                 }
+                // The route kills a low-level party, not the destination. Deadmines was picked
+                // 5 times from Ruins of Lordaeron on the phase20 soak - 13119 yd, band 17-26 -
+                // and lost its leader every single time, walking a level-20 crew through
+                // Silverpine, Hillsbrad and Arathi. The same door entered cleanly from Goldshire
+                // 1500 yd away. Bands topping out at 30 or below: 6 of 9 long routes lost the
+                // leader, 0 of 8 short ones did.
+                //
+                // Filter the MUSTER, not the destination, so a near capital can still field the
+                // party - this costs variety only where the pairing was doomed anyway.
+                if (sPlayerbotAIConfig.travelPartyLowLevelMaxRoute > 0.f &&
+                    sPlayerbotAIConfig.travelPartyLowLevelBand > 0 &&
+                    d.maxLevel <= sPlayerbotAIConfig.travelPartyLowLevelBand)
+                {
+                    float const rdx = d.x - m.x, rdy = d.y - m.y;
+                    if (sqrt(rdx * rdx + rdy * rdy) > sPlayerbotAIConfig.travelPartyLowLevelMaxRoute)
+                        continue;
+                }
+
                 uint32 have = 0;
                 for (uint32 l = d.minLevel; l <= d.maxLevel && l <= 80; ++l)
                     have += perLevel[l];

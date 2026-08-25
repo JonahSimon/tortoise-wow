@@ -277,6 +277,15 @@ bool PlayerbotAIConfig::Initialize()
     // (z -200) and Sunken Temple (z -108) are still untested; if either needs more, raise this
     // via AI_TRAVEL_PARTY_ARRIVE_Z before adding a column.
     travelPartyArriveZ = config.GetFloatDefault("AiPlayerbot.TravelPartyArriveZ", 150.0f);
+    // A low-level party cannot survive a long march: the route, not the destination, kills it.
+    // Measured on the 5 h phase20 soak - a band topping out at 30 or below loses its leader on
+    // 6 of 9 routes past 6000 yd, and on 0 of 8 below it. The mechanism is visible in the
+    // telemetry: Deadmines was selected 5 times from Ruins of Lordaeron, 13119 yd away, with a
+    // 17-26 band, and every one died in Silverpine and Hillsbrad against mobs 10-15 levels
+    // above it. The same instance entered cleanly from Goldshire, 1500 yd away.
+    // 0 on either key disables the gate.
+    travelPartyLowLevelMaxRoute = config.GetFloatDefault("AiPlayerbot.TravelPartyLowLevelMaxRoute", 6000.0f);
+    travelPartyLowLevelBand = config.GetIntDefault("AiPlayerbot.TravelPartyLowLevelBand", 30);
     // Destination-first selection against TravelDestinations.h instead of the single hand-set
     // TravelPartyMuster/TravelPartyDest pair. Default OFF: every existing test recipe and the live
     // .env drive the config pair, and the standing rule for this port is that new behaviour ships
