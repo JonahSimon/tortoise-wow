@@ -3816,6 +3816,49 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
                 F2Log("REGISTRY " + std::string(m.name) + " team=" + std::to_string(m.team) +
                       " map=" + std::to_string(m.map) + " eligible=" + std::to_string(ok) +
                       (blocked.empty() ? "" : " blocked: " + blocked));
+
+                // R7's route sampler, dumped once so it can be checked against real geography
+                // without a player in world. The gate short-circuits before sampling on an empty
+                // server, so nothing else exercises this path unattended.
+                //
+                // Prints counts unconditionally, including `unresolved`: z is interpolated between
+                // the endpoints, and a bad z makes GetZoneId return 0. A silent gate and a gate
+                // sampling nothing but zeroes look identical from the outside, so the number is
+                // printed whether it is good or bad.
+                {
+                    uint32 samples = 0, unresolved = 0;
+                    std::string firstPath;
+                    for (TravelDest const& d : kTravelDests)
+                    {
+                        if (d.map != m.map || d.reqLevel > MAX_TRAVEL_DEST_LEVEL)
+                            continue;
+                        float const dx = d.x - m.x, dy = d.y - m.y, dz = d.z - m.z;
+                        float const len = sqrt(dx * dx + dy * dy);
+                        uint32 const steps =
+                            std::max<uint32>(1, (uint32)(len / TRAVEL_ZONE_SAMPLE_STEP));
+                        std::set<uint32> path;
+                        for (uint32 i = 0; i <= steps; ++i)
+                        {
+                            float const t = (float)i / (float)steps;
+                            uint32 const z = sTerrainMgr.GetZoneId(m.map, m.x + dx * t,
+                                                                   m.y + dy * t, m.z + dz * t);
+                            ++samples;
+                            if (z)
+                                path.insert(z);
+                            else
+                                ++unresolved;
+                        }
+                        if (firstPath.empty())
+                        {
+                            firstPath = std::string(d.name) + ":";
+                            for (uint32 z : path)
+                                firstPath += " " + std::to_string(z);
+                        }
+                    }
+                    F2Log("ZONEPATH " + std::string(m.name) + " samples=" +
+                          std::to_string(samples) + " unresolved=" + std::to_string(unresolved) +
+                          " | " + firstPath);
+                }
             }
         }
 
