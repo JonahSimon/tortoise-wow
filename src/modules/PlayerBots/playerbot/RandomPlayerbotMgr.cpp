@@ -3990,6 +3990,24 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
         return "";
     }
 
+    // R7 on the config-pair path. Registry mode already filtered per candidate above; without
+    // this, turning the gate on while running the hand-set TravelPartyMuster/TravelPartyDest pair
+    // would silently do nothing - a config that reads as enabled and has no effect is the exact
+    // failure this port keeps re-learning (see the .env-vs-rendered-conf trap).
+    if (sPlayerbotAIConfig.travelPartyRequirePlayerZone && !sPlayerbotAIConfig.travelPartyUseRegistry)
+    {
+        std::map<uint32, std::set<uint32>> configPathZones;
+        CollectPlayerZones(configPathZones);
+        auto const zit = configPathZones.find(muster.mapId);
+        if (zit == configPathZones.end() ||
+            !RouteCrossesZone(muster.mapId, muster.x, muster.y, muster.z,
+                              dest.x, dest.y, dest.z, zit->second))
+        {
+            F2Log("no party: the configured route crosses no zone a real player is in");
+            return "";
+        }
+    }
+
     // Recruit from the faction that owns the muster point's zone (2 = Alliance, 4 = Horde in
     // AreaTable, anything else contested -> take either). Keeps the coordinates and the
     // faction filter from drifting apart when the config points somewhere else.
