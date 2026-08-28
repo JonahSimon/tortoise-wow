@@ -38,6 +38,8 @@
 
 #include <algorithm>
 #include <fstream>
+#include <map>
+#include <set>
 #include <cmath>
 
 #ifndef MANGOSBOT_ZERO
@@ -3689,6 +3691,55 @@ static TravelMuster const kMusters[] = {
     { 2, 0, -9448.55f,    68.24f,  56.32f, "Goldshire" },            // Elwynn
 };
 
+// R7: a march only counts if a real player might see it. Sample the straight muster->destination
+// line and collect the zones it crosses.
+//
+// 400 yd between samples: vanilla zones are thousands of yards across, so this cannot step over
+// one, and the longest route in the registry (13120 yd) costs 33 lookups. Sampling the straight
+// line rather than the walked path is deliberate - the real path is not known until the party
+// exists, and the gate has to answer BEFORE recruiting. The straight line is the corridor the
+// party broadly follows, and being approximate here costs at most an occasional party that skirts
+// a player's zone instead of entering it.
+static float const TRAVEL_ZONE_SAMPLE_STEP = 400.0f;
+
+// z is interpolated between the endpoints, which is crude on hilly ground. GetZoneId is driven
+// almost entirely by x/y outdoors, and a bad z returns 0, which is skipped rather than guessed at.
+static bool RouteCrossesZone(uint32 mapId, float ax, float ay, float az,
+                             float bx, float by, float bz,
+                             std::set<uint32> const& zones)
+{
+    float const dx = bx - ax, dy = by - ay, dz = bz - az;
+    float const len = sqrt(dx * dx + dy * dy);
+    uint32 const steps = std::max<uint32>(1, (uint32)(len / TRAVEL_ZONE_SAMPLE_STEP));
+    for (uint32 i = 0; i <= steps; ++i)
+    {
+        float const t = (float)i / (float)steps;
+        uint32 const zone = sTerrainMgr.GetZoneId(mapId, ax + dx * t, ay + dy * t, az + dz * t);
+        if (zone && zones.count(zone))
+            return true;
+    }
+    return false;
+}
+
+// Zones containing at least one REAL player, keyed by map.
+//
+// Sessions filtered by GetBotAI() == nullptr, the same path RefreshPlayerZones uses and for the
+// same reason: this core's `players` member is a mixed map of real players and non-random bots,
+// so it cannot answer "is a human here".
+static void CollectPlayerZones(std::map<uint32, std::set<uint32>>& out)
+{
+    for (auto const& itr : sWorld.GetAllSessions())
+    {
+        WorldSession* session = itr.second;
+        if (!session)
+            continue;
+        Player* player = session->GetPlayer();
+        if (!player || !player->IsInWorld() || GetBotAI(player))
+            continue;
+        out[player->GetMapId()].insert(player->GetZoneId());
+    }
+}
+
 // Is this bot recruitable for a march at all, faction and state aside from level?
 static bool IsTravelEligible(Player* bot)
 {
@@ -3775,6 +3826,27 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
         // Walk the musters in random order so one continent does not monopolise the (currently
         // single) party slot, and inside each, keep only the destinations that actually have
         // enough eligible bots in their own band right now.
+        // R7: collect the zones real players are standing in, once, before any candidate work.
+        // With the gate on and nobody logged in there is nothing to be seen by, so no party should
+        // form at all - say so explicitly, because "zero parties" is exactly what a dead server
+        // looks like and this project has already lost a session to that confusion.
+        std::map<uint32, std::set<uint32>> playerZones;
+        if (sPlayerbotAIConfig.travelPartyRequirePlayerZone)
+        {
+            CollectPlayerZones(playerZones);
+            if (playerZones.empty())
+            {
+                F2Log("REQUIRE PLAYER ZONE is ON and no real player is in world - "
+                      "no party will form, by design");
+                return "";
+            }
+            std::string seen;
+            for (auto const& mz : playerZones)
+                for (uint32 z : mz.second)
+                    seen += "map" + std::to_string(mz.first) + ":zone" + std::to_string(z) + " ";
+            F2Log("REQUIRE PLAYER ZONE is ON, players in: " + seen);
+        }
+
         size_t const musterCount = sizeof(kMusters) / sizeof(kMusters[0]);
         std::vector<size_t> order(musterCount);
         for (size_t i = 0; i < musterCount; ++i)
@@ -3786,6 +3858,10 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
 
         struct Candidate { TravelMuster const* m; TravelDest const* d; };
         std::vector<Candidate> viable;
+        // Counted so the "nothing to do" message can name the real reason. Reporting an R7 filter
+        // as "not enough eligible bots" is precisely the wrong-cause confusion this gate is most
+        // likely to cause, and the one that already cost this project a session.
+        uint32 unseenRoutes = 0;
 
         for (size_t mi : order)
         {
@@ -3849,6 +3925,19 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
                         continue;
                 }
 
+                // R7: the march has to cross a zone somebody is standing in. Checked last of the
+                // cheap filters because it is the only one that walks the route.
+                if (sPlayerbotAIConfig.travelPartyRequirePlayerZone)
+                {
+                    auto const zit = playerZones.find(m.map);
+                    if (zit == playerZones.end() ||
+                        !RouteCrossesZone(m.map, m.x, m.y, m.z, d.x, d.y, d.z, zit->second))
+                    {
+                        ++unseenRoutes;
+                        continue;
+                    }
+                }
+
                 uint32 have = 0;
                 for (uint32 l = d.minLevel; l <= d.maxLevel && l <= 80; ++l)
                     have += perLevel[l];
@@ -3862,7 +3951,15 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
 
         if (viable.empty())
         {
-            sLog.outError("F2: registry mode found no destination with enough eligible bots");
+            if (unseenRoutes)
+            {
+                F2Log("no party: " + std::to_string(unseenRoutes) +
+                      " route(s) had bots but crossed no zone a real player is in");
+                sLog.outBasic("F2: %u candidate route(s) skipped - no real player would see them",
+                              unseenRoutes);
+            }
+            else
+                sLog.outError("F2: registry mode found no destination with enough eligible bots");
             return "";
         }
 

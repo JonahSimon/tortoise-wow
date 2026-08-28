@@ -291,6 +291,17 @@ bool PlayerbotAIConfig::Initialize()
     // .env drive the config pair, and the standing rule for this port is that new behaviour ships
     // disabled until it has been watched working.
     travelPartyUseRegistry = config.GetBoolDefault("AiPlayerbot.TravelPartyUseRegistry", false);
+    // R7 (Jonah, 2026-08-28): "they should only start a group if they are going to pass through a
+    // zone a real player is in ... we don't want them to just be going through zones no one will
+    // see them." Being seen stops being the goal and becomes a precondition for forming at all.
+    //
+    // Default OFF, and deliberately so despite the feature being wanted. With it ON and nobody
+    // logged in, ZERO parties form - correct by the rule, but indistinguishable at a glance from a
+    // broken server, which is a failure mode this project has already paid for once. It also ships
+    // disabled under the standing rule that new behaviour is watched working before it is default.
+    // Turn on with AI_TRAVEL_PARTY_REQUIRE_PLAYER_ZONE=1.
+    travelPartyRequirePlayerZone =
+        config.GetBoolDefault("AiPlayerbot.TravelPartyRequirePlayerZone", false);
     // G2: how many marches may run at once. Was hard-coded to 1 with a `ponytail:` note to lift it
     // "once a walk has been watched end to end" - which G1's fix delivered. 3 is deliberately
     // modest: 3 parties x 5 bots is 15 of a 1000-bot pool, and every extra party is another

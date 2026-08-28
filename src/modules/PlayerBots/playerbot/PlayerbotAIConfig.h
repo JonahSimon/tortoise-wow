@@ -153,6 +153,7 @@ public:
     float travelPartyLowLevelMaxRoute;
     uint32 travelPartyLowLevelBand;
     bool travelPartyUseRegistry;
+    bool travelPartyRequirePlayerZone;
     uint32 travelPartyMaxConcurrent;
     uint32 travelPartySpawnInterval;
     uint32 travelPartyMaxDeaths;
