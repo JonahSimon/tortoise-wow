@@ -3944,13 +3944,24 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
         // branch happens to cross an occupied zone (the cross-world one, every time).
         bool const townRun = sPlayerbotAIConfig.travelPartyClosestTownPct > 0 &&
                              urand(1, 100) <= sPlayerbotAIConfig.travelPartyClosestTownPct;
+        // R6: is this attempt looking for a raid rather than a dungeon? Rolled per attempt for the
+        // same reason as the town roll - "less frequent than dungeon groups" is a statement about
+        // parties. At 0 (the default) this is always false and raids stay in the pool as ordinary
+        // destinations, which is the pre-R4 behaviour.
+        bool const raidRun = sPlayerbotAIConfig.travelPartyRaidPct > 0 &&
+                             urand(1, 100) <= sPlayerbotAIConfig.travelPartyRaidPct;
+
         // Logged on every attempt, including the attempts that go on to form nothing, so the
         // denominator of the ratio is visible. Counting only the SELECTED lines measures the roll
         // AFTER the R7 and eligibility filters have thinned it, which is the skew this ordering
         // was chosen to avoid measuring.
-        if (sPlayerbotAIConfig.travelPartyClosestTownPct)
-            F2Log(std::string("ROLL ") + (townRun ? "town" : "city") + " (closest-town pct " +
-                  std::to_string(sPlayerbotAIConfig.travelPartyClosestTownPct) + ")");
+        //
+        // Both rolls on one line: a raid attempt ignores the town roll entirely (R4 says capital,
+        // always), so printing them separately would show a `town` roll that nothing acted on.
+        if (sPlayerbotAIConfig.travelPartyClosestTownPct || sPlayerbotAIConfig.travelPartyRaidPct)
+            F2Log(std::string("ROLL ") + (raidRun ? "raid/city" : (townRun ? "dungeon/town" : "dungeon/city")) +
+                  " (town pct " + std::to_string(sPlayerbotAIConfig.travelPartyClosestTownPct) +
+                  ", raid pct " + std::to_string(sPlayerbotAIConfig.travelPartyRaidPct) + ")");
 
         // The muster is resolved per candidate now, and a town is not a kMusters row, so the
         // candidate carries the point by value rather than pointing into either table.
@@ -3993,6 +4004,12 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
                 if (d.reqLevel > MAX_TRAVEL_DEST_LEVEL)
                     continue;
 
+                // R6: the two tracks do not mix. A raid attempt considers only the 8 raid rows, a
+                // dungeon attempt only the 28 dungeon rows. Off at 0, where raidRun is always
+                // false and this filter never runs, leaving raids in the pool as before.
+                if (sPlayerbotAIConfig.travelPartyRaidPct > 0 && d.isRaid != raidRun)
+                    continue;
+
                 // R3: where this particular party starts. `m` is the capital for this
                 // (team, map) - the 30% cross-world branch, and the whole of the pre-R3
                 // behaviour. The 70% branch starts at the closest friendly town instead.
@@ -4005,9 +4022,14 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
                 // silently impossible: the route filter below drops it and the branch never fires
                 // for low-level content at all.
                 TravelMuster use = m;
-                char const* branch = "city";
+                char const* branch = raidRun ? "city(raid)" : "city";
+                // R4: "Raid groups should always come from a capital city and make their way to
+                // the raid across the whole world." So a raid attempt skips the town branch
+                // outright - neither the 70/30 roll nor the low-band override applies to it. The
+                // low-band override could not fire anyway (every raid row is band 50-60 or 60-60),
+                // but stating it here means that stays true if the registry is ever regenerated.
                 bool const wantTown =
-                    sPlayerbotAIConfig.travelPartyClosestTownPct > 0 &&
+                    !raidRun && sPlayerbotAIConfig.travelPartyClosestTownPct > 0 &&
                     (townRun || (sPlayerbotAIConfig.travelPartyLowLevelBand > 0 &&
                                  d.maxLevel <= sPlayerbotAIConfig.travelPartyLowLevelBand));
                 // No town of this faction on this map falls back to the capital rather than

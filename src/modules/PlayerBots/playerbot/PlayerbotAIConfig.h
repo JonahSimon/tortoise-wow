@@ -155,6 +155,7 @@ public:
     bool travelPartyUseRegistry;
     bool travelPartyRequirePlayerZone;
     uint32 travelPartyClosestTownPct;
+    uint32 travelPartyRaidPct;
     uint32 travelPartyMaxConcurrent;
     uint32 travelPartySpawnInterval;
     uint32 travelPartyMaxDeaths;

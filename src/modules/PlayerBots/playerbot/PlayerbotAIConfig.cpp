@@ -315,6 +315,22 @@ bool PlayerbotAIConfig::Initialize()
     // capital" is a worse failure than a loud one.
     travelPartyClosestTownPct =
         std::min<uint32>(100, config.GetIntDefault("AiPlayerbot.TravelPartyClosestTownPct", 0));
+    // R4 + R6 (Jonah, 2026-08-28): "Raid groups should always come from a capital city and make
+    // their way to the raid across the whole world ... The raid groups should be less frequent
+    // than the dungeon groups."
+    //
+    // One key covers both rules. It is the chance that a given spawn attempt goes looking for a
+    // RAID rather than a dungeon, so "less frequent" is the number itself rather than a second
+    // cadence to keep in step with the first. A raid attempt considers only raid destinations and
+    // always musters at a capital, never a town - R3's roll does not apply to it.
+    //
+    // **0 is off and means the pre-R4 behaviour**, which is NOT "no raids": today the 8 raid rows
+    // sit in the pool as ordinary destinations and get picked like any other. Turning this on is
+    // what separates the two tracks. 20 is a sensible first value - 8 of the 36 reachable rows are
+    // raids, so leaving it off already yields roughly 22 %, and anything below that is what
+    // "less frequent than dungeons" actually asks for.
+    travelPartyRaidPct =
+        std::min<uint32>(100, config.GetIntDefault("AiPlayerbot.TravelPartyRaidPct", 0));
     // G2: how many marches may run at once. Was hard-coded to 1 with a `ponytail:` note to lift it
     // "once a walk has been watched end to end" - which G1's fix delivered. 3 is deliberately
     // modest: 3 parties x 5 bots is 15 of a 1000-bot pool, and every extra party is another
