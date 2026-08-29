@@ -34,6 +34,7 @@
 #include "Movement/spline/MoveSpline.h"
 #include "playerbot/strategy/Engine.h"
 #include "playerbot/TravelDestinations.h"
+#include "playerbot/TravelTowns.h"
 #include "Movement/MotionMaster.h"
 
 #include <algorithm>
@@ -3691,6 +3692,43 @@ static TravelMuster const kMusters[] = {
     { 2, 0, -9448.55f,    68.24f,  56.32f, "Goldshire" },            // Elwynn
 };
 
+// R3: the closest friendly town to a destination, out of the 94-row TravelTowns.h registry.
+//
+// Same map and same team only. **team 0 is deliberately not eligible.** Most team-0 rows are
+// wilderness graveyards rather than towns at all (Felwood, Silithus, Moonglade); the handful that
+// are real neutral ports (Booty Bay, Gadgetzan, Everlook) would be legitimate musters for either
+// side, but there is no way to tell the two apart from the generated data, and a party mustering
+// in an empty Silithus graveyard is worse than one mustering a zone further away.
+//
+// Straight-line distance on x/y, the same measure the low-band route gate uses, so the two agree
+// about what "far" means.
+//
+// ponytail: nearest wins outright, no minimum. The shortest pairing in the registry is Razorfen
+// Kraul from The Great Lift at 227 yd, and 6 of 70 pairings are under 500 - short enough to be a
+// walk rather than a march. Median is 1650 yd, so this is the tail, not the shape. If the short
+// ones turn out to dominate what a player actually sees, take the closest town past a floor
+// instead of the closest town outright.
+static TravelTown const* ClosestFriendlyTown(uint32 mapId, uint32 team, float x, float y)
+{
+    if (!team)
+        return nullptr;   // team 0 is not a side, and 39 of the 94 rows carry it
+    TravelTown const* best = nullptr;
+    float bestDist = 0.f;
+    for (TravelTown const& t : kTravelTowns)
+    {
+        if (t.map != mapId || t.team != team)
+            continue;
+        float const dx = t.x - x, dy = t.y - y;
+        float const dist = dx * dx + dy * dy;   // squared: only the ordering matters
+        if (!best || dist < bestDist)
+        {
+            best = &t;
+            bestDist = dist;
+        }
+    }
+    return best;
+}
+
 // R7: a march only counts if a real player might see it. Sample the straight muster->destination
 // line and collect the zones it crosses.
 //
@@ -3899,7 +3937,28 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
         for (size_t i = musterCount; i > 1; --i)
             std::swap(order[i - 1], order[urand(0, (uint32)i - 1)]);
 
-        struct Candidate { TravelMuster const* m; TravelDest const* d; };
+        // R3: roll the 70/30 ONCE per spawn attempt, not per candidate, because the ratio Jonah
+        // asked for is a ratio of PARTIES. Rolled before the R7 filter runs and never re-rolled
+        // after it, which is the ordering he chose: the ratio stays exact and fewer parties form
+        // when few players are online, rather than the ratio quietly skewing toward whichever
+        // branch happens to cross an occupied zone (the cross-world one, every time).
+        bool const townRun = sPlayerbotAIConfig.travelPartyClosestTownPct > 0 &&
+                             urand(1, 100) <= sPlayerbotAIConfig.travelPartyClosestTownPct;
+        // Logged on every attempt, including the attempts that go on to form nothing, so the
+        // denominator of the ratio is visible. Counting only the SELECTED lines measures the roll
+        // AFTER the R7 and eligibility filters have thinned it, which is the skew this ordering
+        // was chosen to avoid measuring.
+        if (sPlayerbotAIConfig.travelPartyClosestTownPct)
+            F2Log(std::string("ROLL ") + (townRun ? "town" : "city") + " (closest-town pct " +
+                  std::to_string(sPlayerbotAIConfig.travelPartyClosestTownPct) + ")");
+
+        // The muster is resolved per candidate now, and a town is not a kMusters row, so the
+        // candidate carries the point by value rather than pointing into either table.
+        // `branch` is recorded where the muster is chosen, not re-derived at log time. R3 is a
+        // ratio and the log lines are the only way to check it, so a label that reconstructs the
+        // roll after the fact can disagree with the roll itself and there would be nothing to
+        // catch it.
+        struct Candidate { TravelMuster m; TravelDest const* d; char const* branch; };
         std::vector<Candidate> viable;
         // Counted so the "nothing to do" message can name the real reason. Reporting an R7 filter
         // as "not enough eligible bots" is precisely the wrong-cause confusion this gate is most
@@ -3934,6 +3993,33 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
                 if (d.reqLevel > MAX_TRAVEL_DEST_LEVEL)
                     continue;
 
+                // R3: where this particular party starts. `m` is the capital for this
+                // (team, map) - the 30% cross-world branch, and the whole of the pre-R3
+                // behaviour. The 70% branch starts at the closest friendly town instead.
+                //
+                // The low-band gate WINS over the roll (Jonah's call): a destination whose band
+                // tops out at or below TravelPartyLowLevelBand always musters at the closest town,
+                // never a capital. Otherwise the 30% branch is exactly the pairing f1fd946 exists
+                // to forbid - a level-20 crew walking Silverpine to the Deadmines, which died 5
+                // for 5 on the phase20 soak. It would not merely be dangerous, it would be
+                // silently impossible: the route filter below drops it and the branch never fires
+                // for low-level content at all.
+                TravelMuster use = m;
+                char const* branch = "city";
+                bool const wantTown =
+                    sPlayerbotAIConfig.travelPartyClosestTownPct > 0 &&
+                    (townRun || (sPlayerbotAIConfig.travelPartyLowLevelBand > 0 &&
+                                 d.maxLevel <= sPlayerbotAIConfig.travelPartyLowLevelBand));
+                // No town of this faction on this map falls back to the capital rather than
+                // dropping the destination. Every (team, map) pair has towns today (A 20/9,
+                // H 10/16), so this is a guard against a regenerated registry, not a live path.
+                if (wantTown)
+                    if (TravelTown const* t = ClosestFriendlyTown(m.map, m.team, d.x, d.y))
+                    {
+                        use = TravelMuster{ t->team, t->map, t->x, t->y, t->z, t->name };
+                        branch = townRun ? "town" : "town(low band)";
+                    }
+
                 // G16: do not march a party into the ENEMY'S CAPITAL. Stormwind Vault and
                 // Stormwind Stockades sit inside Stormwind, Ragefire Chasm inside Orgrimmar, so a
                 // naive same-map filter happily picked "Stormwind Vault from Ruins of Lordaeron"
@@ -3947,7 +4033,7 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
                         GetAreaEntryByAreaID(sTerrainMgr.GetZoneId(d.map, d.x, d.y, d.z)))
                 {
                     if ((destArea->flags & AREA_FLAG_CAPITAL) && destArea->team &&
-                        destArea->team != m.team)
+                        destArea->team != use.team)
                         continue;
                 }
                 // The route kills a low-level party, not the destination. Deadmines was picked
@@ -3963,7 +4049,7 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
                     sPlayerbotAIConfig.travelPartyLowLevelBand > 0 &&
                     d.maxLevel <= sPlayerbotAIConfig.travelPartyLowLevelBand)
                 {
-                    float const rdx = d.x - m.x, rdy = d.y - m.y;
+                    float const rdx = d.x - use.x, rdy = d.y - use.y;
                     if (sqrt(rdx * rdx + rdy * rdy) > sPlayerbotAIConfig.travelPartyLowLevelMaxRoute)
                         continue;
                 }
@@ -3972,9 +4058,9 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
                 // cheap filters because it is the only one that walks the route.
                 if (sPlayerbotAIConfig.travelPartyRequirePlayerZone)
                 {
-                    auto const zit = playerZones.find(m.map);
+                    auto const zit = playerZones.find(use.map);
                     if (zit == playerZones.end() ||
-                        !RouteCrossesZone(m.map, m.x, m.y, m.z, d.x, d.y, d.z, zit->second))
+                        !RouteCrossesZone(use.map, use.x, use.y, use.z, d.x, d.y, d.z, zit->second))
                     {
                         ++unseenRoutes;
                         continue;
@@ -3985,7 +4071,7 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
                 for (uint32 l = d.minLevel; l <= d.maxLevel && l <= 80; ++l)
                     have += perLevel[l];
                 if (have >= 2)
-                    viable.push_back({ &m, &d });
+                    viable.push_back({ use, &d, branch });
             }
 
             if (!viable.empty())
@@ -4007,17 +4093,24 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
         }
 
         Candidate const& pick = viable[urand(0, viable.size() - 1)];
-        muster = WorldLocation(pick.m->map, pick.m->x, pick.m->y, pick.m->z);
+        muster = WorldLocation(pick.m.map, pick.m.x, pick.m.y, pick.m.z);
         dest = WorldLocation(pick.d->map, pick.d->x, pick.d->y, pick.d->z);
-        forcedTeam = pick.m->team;
+        forcedTeam = pick.m.team;
         bandMin = pick.d->minLevel;
         bandMax = pick.d->maxLevel;
         destName = pick.d->name;
         pickedDest = pick.d;
 
+        // R3 is a RATIO, so it can only be checked by counting log lines. Every SELECTED names
+        // which branch of the roll produced it and how long the route is - `town` for the 70%
+        // local march, `city` for the 30% cross-world one, and `town(low band)` where the low-band
+        // gate overrode the roll, so a skewed count can be told from a correct one that happened
+        // to draw a lot of low-level destinations.
+        float const pdx = pick.d->x - pick.m.x, pdy = pick.d->y - pick.m.y;
         F2Log("SELECTED " + destName + " (trigger " + std::to_string(pick.d->trigger) + ", req " +
-              std::to_string((uint32)pick.d->reqLevel) + ") from " + pick.m->name +
-              " band " + std::to_string(bandMin) + "-" + std::to_string(bandMax));
+              std::to_string((uint32)pick.d->reqLevel) + ") from " + pick.m.name +
+              " band " + std::to_string(bandMin) + "-" + std::to_string(bandMax) +
+              " via " + pick.branch + " route " + std::to_string((uint32)sqrt(pdx * pdx + pdy * pdy)) + " yd");
     }
     else if (!ParseTravelPoint(sPlayerbotAIConfig.travelPartyMuster, muster) ||
              !ParseTravelPoint(sPlayerbotAIConfig.travelPartyDest, dest))

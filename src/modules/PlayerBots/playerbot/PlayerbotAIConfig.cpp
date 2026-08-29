@@ -302,6 +302,19 @@ bool PlayerbotAIConfig::Initialize()
     // Turn on with AI_TRAVEL_PARTY_REQUIRE_PLAYER_ZONE=1.
     travelPartyRequirePlayerZone =
         config.GetBoolDefault("AiPlayerbot.TravelPartyRequirePlayerZone", false);
+    // R3 (Jonah, 2026-08-28): "they should generally go from the closest friendly town to the
+    // dungeon they are going to. There should be a smaller chance like 70% and 30% that they go
+    // from a major city and make their way across the world."
+    //
+    // The percentage is the CLOSEST-TOWN share, so 70 means 70% short local marches and 30%
+    // cross-world ones from a capital. 0 disables the town registry entirely and every party
+    // musters at a capital, which is exactly the pre-R3 behaviour - the standing default-off rule.
+    // Turn on with AI_TRAVEL_PARTY_CLOSEST_TOWN_PCT=70.
+    //
+    // Above 100 is clamped rather than rejected, because a typo'd 700 silently meaning "never a
+    // capital" is a worse failure than a loud one.
+    travelPartyClosestTownPct =
+        std::min<uint32>(100, config.GetIntDefault("AiPlayerbot.TravelPartyClosestTownPct", 0));
     // G2: how many marches may run at once. Was hard-coded to 1 with a `ponytail:` note to lift it
     // "once a walk has been watched end to end" - which G1's fix delivered. 3 is deliberately
     // modest: 3 parties x 5 bots is 15 of a 1000-bot pool, and every extra party is another
