@@ -53,6 +53,9 @@
 #endif
 
 #include "playerbot/TravelMgr.h"
+// TravelNodeMap::getFullPath + PathNodeType, for the R5 cross-map probe. TravelMgr.h does not
+// pull this in, and the probe is the only thing in this file that needs the node layer.
+#include "playerbot/TravelNode.h"
 #include <iomanip>
 #include <float.h>
 
@@ -3896,6 +3899,86 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
                     F2Log("ZONEPATH " + std::string(m.name) + " samples=" +
                           std::to_string(samples) + " unresolved=" + std::to_string(unresolved) +
                           " | " + firstPath);
+                }
+
+                // R5 probe. Diagnostic only - forms nothing, changes nothing, default off.
+                //
+                // The DB says the transport graph exists (233 type-3 links, 10 of them cross-map,
+                // the complete real vanilla set). That proves the DATA is present, NOT that the
+                // pathfinder will route over it - and there is a specific reason to doubt it:
+                // loadNodeStore() builds every node with addNode(pos, name, true), leaving the
+                // transport flag defaulted, so a DB-loaded transport node reports
+                // isTransport() == false while its link still carries type 3.
+                //
+                // So ask the module's own pathfinder directly, before building anything on it.
+                // A real bot is passed as the unit rather than nullptr, because pathing is
+                // faction- and position-sensitive and a nullptr probe would answer a question
+                // nobody is asking.
+                if (sPlayerbotAIConfig.travelPartyCrossMapProbe)
+                {
+                    Player* probe = nullptr;
+                    for (auto const& itr : GetAllBots())
+                    {
+                        Player* bot = itr.second;
+                        if (!IsTravelEligible(bot) || !IsRandomBot(bot))
+                            continue;
+                        if ((m.team == 2 && bot->GetTeam() != ALLIANCE) ||
+                            (m.team == 4 && bot->GetTeam() != HORDE))
+                            continue;
+                        probe = bot;
+                        break;
+                    }
+                    if (!probe)
+                    {
+                        // Say so rather than logging nothing: "no line" and "no route" must not
+                        // look the same, which is the trap this project keeps paying for.
+                        F2Log("XMAP " + std::string(m.name) + " SKIPPED - no eligible bot of that "
+                              "faction online yet to probe with");
+                    }
+                    else
+                    {
+                        for (TravelDest const& d : kTravelDests)
+                        {
+                            if (d.map == m.map || d.reqLevel > MAX_TRAVEL_DEST_LEVEL)
+                                continue;
+
+                            TravelPath tp = TravelNodeMap::getFullPath(
+                                WorldPosition(m.map, m.x, m.y, m.z),
+                                WorldPosition(d.map, d.x, d.y, d.z), probe);
+
+                            uint32 pts = 0, transports = 0, flights = 0, triggers = 0;
+                            std::string entries;
+                            uint32 endMap = 0;
+                            for (PathNodePoint const& pt : tp.getPath())
+                            {
+                                ++pts;
+                                endMap = pt.point.getMapId();
+                                if (pt.type == PathNodeType::NODE_TRANSPORT)
+                                {
+                                    ++transports;
+                                    std::string const e = std::to_string(pt.entry);
+                                    if (entries.find(e) == std::string::npos)
+                                        entries += e + " ";
+                                }
+                                else if (pt.type == PathNodeType::NODE_FLIGHTPATH)
+                                    ++flights;
+                                else if (pt.type == PathNodeType::NODE_AREA_TRIGGER)
+                                    ++triggers;
+                            }
+
+                            // Every field printed unconditionally, including the zeroes. A route
+                            // that silently used no transport and a route that was never computed
+                            // must be distinguishable at a glance.
+                            F2Log("XMAP " + std::string(m.name) + " -> " + d.name +
+                                  " points=" + std::to_string(pts) +
+                                  " transport=" + std::to_string(transports) +
+                                  " flight=" + std::to_string(flights) +
+                                  " trigger=" + std::to_string(triggers) +
+                                  " endMap=" + std::to_string(endMap) +
+                                  " wantMap=" + std::to_string(d.map) +
+                                  (entries.empty() ? "" : " via " + entries));
+                        }
+                    }
                 }
             }
         }

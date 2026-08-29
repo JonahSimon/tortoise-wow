@@ -331,6 +331,17 @@ bool PlayerbotAIConfig::Initialize()
     // "less frequent than dungeons" actually asks for.
     travelPartyRaidPct =
         std::min<uint32>(100, config.GetIntDefault("AiPlayerbot.TravelPartyRaidPct", 0));
+    // R5 probe, diagnostic only - forms no party and changes no behaviour. Asks the module's OWN
+    // node pathfinder for a route from each muster to every destination on the OTHER continent and
+    // reports whether one exists, whether it boards a transport, and whether it would use a flight
+    // path (which Jonah ruled out). Default OFF and meant for a throwaway container: it runs a
+    // cross-map pathfind per pair, which is far too expensive for a live boot.
+    //
+    // This exists because "the transport links are in the DB" (233 of them, 10 cross-map) proves
+    // the DATA is there, not that the PATHFINDER will use it - and loadNodeStore() drops the
+    // node's isTransport flag, so there is a specific reason to doubt it.
+    travelPartyCrossMapProbe =
+        config.GetBoolDefault("AiPlayerbot.TravelPartyCrossMapProbe", false);
     // G2: how many marches may run at once. Was hard-coded to 1 with a `ponytail:` note to lift it
     // "once a walk has been watched end to end" - which G1's fix delivered. 3 is deliberately
     // modest: 3 parties x 5 bots is 15 of a 1000-bot pool, and every extra party is another
