@@ -66,6 +66,17 @@ void PathInfo::setPathLengthLimit(float dist)
 
 bool PathInfo::calculate(float destX, float destY, float destZ, bool forceDest, bool offsets)
 {
+    // A null owner is a SUPPORTED state here, not an impossible one: the playerbot compat shim
+    // PathInfo(uint32 mapId, uint32 instanceId) (PathFinder.h) ignores both arguments and delegates
+    // to PathInfo((Unit const*)nullptr). createFilter() already handles it; calculate() did not, so
+    // the first thing it did was dereference the null. See the guard in the Vector3 overload.
+    if (!m_sourceUnit)
+    {
+        m_type = PATHFIND_NOPATH;
+        m_pathPoints.clear();
+        return false;
+    }
+
     float x, y, z;
     m_sourceUnit->GetSafePosition(x, y, z, m_transport);
 
@@ -74,6 +85,24 @@ bool PathInfo::calculate(float destX, float destY, float destZ, bool forceDest, 
 
 bool PathInfo::calculate(Vector3 const& start, Vector3 dest, bool forceDest, bool offsets)
 {
+    // Every line below dereferences m_sourceUnit -- GetMapId() on the very next statement, then
+    // HasUnitState() and GetObjectBoundingRadius(). The playerbot module reaches here with a null
+    // owner whenever it pathfinds from a position on a map the bot is not standing on:
+    // WorldPosition::getPathFromPath() picks a thread-hash instanceId in that case, which then
+    // fails its own `instanceId == bot->GetInstanceId()` test and builds PathFinder(mapId,
+    // instanceId) -- the shim, which discards both and passes nullptr.
+    //
+    // Report "no path" rather than crashing the world thread. Every caller already handles an
+    // empty result; none of them survive a SIGSEGV. Must NOT be PATHFIND_INCOMPLETE: the module's
+    // WorldPosition::getPathStepFrom() calls retvec.back() unconditionally on that branch, which
+    // would trade this crash for an empty-vector one.
+    if (!m_sourceUnit)
+    {
+        m_type = PATHFIND_NOPATH;
+        m_pathPoints.clear();
+        return false;
+    }
+
     // A m_navMeshQuery object is not thread safe, but a same PathInfo can be shared between threads.
     // So need to get a new one.
     MMAP::MMapManager* mmap = MMAP::MMapFactory::createOrGetMMapManager();

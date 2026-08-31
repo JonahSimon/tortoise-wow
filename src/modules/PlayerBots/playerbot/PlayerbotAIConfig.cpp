@@ -338,8 +338,14 @@ bool PlayerbotAIConfig::Initialize()
     // cross-map pathfind per pair, which is far too expensive for a live boot.
     //
     // This exists because "the transport links are in the DB" (233 of them, 10 cross-map) proves
-    // the DATA is there, not that the PATHFINDER will use it - and loadNodeStore() drops the
-    // node's isTransport flag, so there is a specific reason to doubt it.
+    // the DATA is there, not that the PATHFINDER will use it.
+    //
+    // Corrected 2026-08-30: this comment used to claim loadNodeStore() drops the node's
+    // isTransport flag. It does not, and there is no such flag to drop - TravelNode has no
+    // transport member (the ones in the header are commented out) and isTransport()/getTransportId()
+    // are DERIVED from link types at TravelNode.h:154-155, which load from the DB correctly.
+    // addNode()'s trailing transport/transportId parameters are dead: the body ignores them.
+    // The first run of this probe crashed instead, for an unrelated reason - see PathFinder.cpp.
     travelPartyCrossMapProbe =
         config.GetBoolDefault("AiPlayerbot.TravelPartyCrossMapProbe", false);
     // G2: how many marches may run at once. Was hard-coded to 1 with a `ponytail:` note to lift it

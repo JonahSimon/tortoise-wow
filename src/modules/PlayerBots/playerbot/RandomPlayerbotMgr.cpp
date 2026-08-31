@@ -3911,10 +3911,14 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
                 //
                 // The DB says the transport graph exists (233 type-3 links, 10 of them cross-map,
                 // the complete real vanilla set). That proves the DATA is present, NOT that the
-                // pathfinder will route over it - and there is a specific reason to doubt it:
-                // loadNodeStore() builds every node with addNode(pos, name, true), leaving the
-                // transport flag defaulted, so a DB-loaded transport node reports
-                // isTransport() == false while its link still carries type 3.
+                // pathfinder will route over it.
+                //
+                // Corrected 2026-08-30: the doubt used to be "loadNodeStore() leaves the transport
+                // flag defaulted, so a DB-loaded transport node reports isTransport() == false".
+                // That is wrong. isTransport() is derived from link types (TravelNode.h:154), not
+                // stored, so DB-loaded nodes report it correctly and addNode()'s transport
+                // parameters are dead code. The first run of this probe did crash, but in
+                // PathInfo::calculate via a null-owner PathFinder - now guarded there.
                 //
                 // So ask the module's own pathfinder directly, before building anything on it.
                 // A real bot is passed as the unit rather than nullptr, because pathing is
