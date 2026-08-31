@@ -3820,6 +3820,12 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
         static bool dumped = false;
         if (!dumped)
         {
+            // The R5 probe needs a bot of the muster's own faction already in world, and the first
+            // spawn attempt can beat the random bots to it - which is exactly what happened on the
+            // phase28 run: all four musters logged SKIPPED at boot and the one-shot was spent, so
+            // eight hours of uptime produced zero route data. Unlatch and retry when that happens,
+            // so the diagnostic cannot be consumed by the one attempt where it could not answer.
+            bool probeSkipped = false;
             dumped = true;
             for (TravelMuster const& m : kMusters)
             {
@@ -3933,7 +3939,8 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
                         // Say so rather than logging nothing: "no line" and "no route" must not
                         // look the same, which is the trap this project keeps paying for.
                         F2Log("XMAP " + std::string(m.name) + " SKIPPED - no eligible bot of that "
-                              "faction online yet to probe with");
+                              "faction online yet to probe with, will retry next spawn attempt");
+                        probeSkipped = true;
                     }
                     else
                     {
@@ -3981,6 +3988,9 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
                     }
                 }
             }
+
+            if (probeSkipped)
+                dumped = false;
         }
 
         // Destination first, then recruit to fit it - the reverse of the config path, and the
