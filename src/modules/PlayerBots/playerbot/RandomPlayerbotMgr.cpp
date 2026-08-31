@@ -3926,6 +3926,15 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
                 // nobody is asking.
                 if (sPlayerbotAIConfig.travelPartyCrossMapProbe)
                 {
+                    // The bot must be ON THE MUSTER'S MAP, not merely of its faction. The first
+                    // answered run (phase30) picked by faction alone and both probe bots happened
+                    // to land on map 0, so both map-0 musters routed 12/14 and both map-1 musters
+                    // routed 0/22 - a result that reads exactly like "transport routing only works
+                    // one way" but is equally explained by bot placement. WorldPosition::
+                    // getPathFromPath() cannot pathfind from a position on a map the bot is not on
+                    // (it builds a unit-less PathFinder, which now honestly reports no-path
+                    // instead of crashing), so an off-map bot fails every start-path check and
+                    // empties the route. Requiring the map makes the two explanations separable.
                     Player* probe = nullptr;
                     for (auto const& itr : GetAllBots())
                     {
@@ -3935,6 +3944,8 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
                         if ((m.team == 2 && bot->GetTeam() != ALLIANCE) ||
                             (m.team == 4 && bot->GetTeam() != HORDE))
                             continue;
+                        if (bot->GetMapId() != m.map)
+                            continue;
                         probe = bot;
                         break;
                     }
@@ -3943,7 +3954,8 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
                         // Say so rather than logging nothing: "no line" and "no route" must not
                         // look the same, which is the trap this project keeps paying for.
                         F2Log("XMAP " + std::string(m.name) + " SKIPPED - no eligible bot of that "
-                              "faction online yet to probe with, will retry next spawn attempt");
+                              "faction ON MAP " + std::to_string(m.map) + " yet to probe with, "
+                              "will retry next spawn attempt");
                         probeSkipped = true;
                     }
                     else
