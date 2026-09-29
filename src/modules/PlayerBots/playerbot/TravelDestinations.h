@@ -49,7 +49,7 @@ static TravelDest const kTravelDests[] = {
     {  2567, 0,    1282.05f,   -2548.73f,    85.40f, 58, 60, 45, "Scholomance", 289,    190.82f,    126.33f,   137.23f, 6.28f, false },
     {   145, 0,    -229.49f,    1576.35f,    78.89f, 22, 30, 10, "Shadowfang Keep",  33,   -228.19f,   2111.41f,    76.89f, 1.22f, false },
     {   101, 0,   -8761.85f,     848.56f,    87.81f, 24, 32, 15, "Stormwind Stockades",  34,     48.98f,      0.48f,   -16.39f, 6.28f, false },
-    {   107, 0,   -8667.56f,     623.56f,    85.41f, 58, 60, 58, "Stormwind Vault",  35,     -0.91f,     40.57f,   -24.23f, 1.52f, false },  // 3 doors, canonical picked; band = reqLevel..cap, no conventional range
+    {  5003, 0,   -9362.37f,     537.77f,    48.67f, 58, 60, 58, "Stormwind Vault",  35,     -0.91f,     40.57f,   -24.23f, 1.52f, false },  // 3 doors, canonical picked; band = reqLevel..cap, no conventional range
     {  2214, 0,    3237.46f,   -4060.60f,   112.01f, 58, 60, 45, "Stratholme", 329,   3590.87f,  -3643.22f,   138.49f, 5.50f, false },  // 3 doors, canonical picked
     {   446, 0,  -10162.70f,   -3998.65f,  -107.98f, 50, 60, 35, "Sunken Temple", 109,   -315.90f,    100.20f,  -131.85f, 3.14f, false },
     {  4010, 1,   -8230.40f,    2005.33f,   129.86f, 60, 60, 60, "Temple of Ahn'Qiraj", 531,  -8221.35f,   2014.34f,   129.07f, 0.87f, true  },  // band = reqLevel..cap, no conventional range

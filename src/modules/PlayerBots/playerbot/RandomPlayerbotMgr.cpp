@@ -2476,6 +2476,16 @@ bool RandomPlayerbotMgr::ProcessBot(Player* player)
 
     uint32 bot = player->GetGUIDLow();
 
+    // Keep random bots PvP flagged everywhere, so a player can attack them outside contested
+    // zones too. This sets the same preference flag /pvp does: a bare SetPvP(true), which Refresh()
+    // already does, is dropped again by Player::UpdatePvPFlagTimer on its next tick. The preference
+    // does not survive a relog (Player::LoadFromDB clears it), so re-apply it here, not once at login.
+    if (sPlayerbotAIConfig.randomBotForcePvp && !player->IsPvPDesired())
+    {
+        player->SetFlag(PLAYER_FLAGS, PLAYER_FLAGS_PVP_DESIRED);
+        player->UpdatePvP(true);
+    }
+
     if (player->InBattleGround())
         return false;
 
@@ -3800,8 +3810,15 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
     //
     // Lifting it is also what makes long registry routes harmless: a 9465 yd march is only a
     // problem while it owns the single slot for half an hour (G14).
+    //
+    // Log the refusal. A silent return here made a full cap indistinguishable from a dead feature
+    // or a reload that never applied (cost real time 2026-08-31). One line per spawn interval.
     if (_travelParties.size() >= sPlayerbotAIConfig.travelPartyMaxConcurrent)
+    {
+        F2Log("CAP full, no party this round: active=" + std::to_string(_travelParties.size()) +
+              "/" + std::to_string(sPlayerbotAIConfig.travelPartyMaxConcurrent));
         return "";
+    }
 
     WorldLocation muster, dest;
     uint32 forcedTeam = 0;          // 0 = derive from the muster zone, as the config path always has
@@ -4155,7 +4172,9 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
                 // Stormwind Stockades sit inside Stormwind, Ragefire Chasm inside Orgrimmar, so a
                 // naive same-map filter happily picked "Stormwind Vault from Ruins of Lordaeron"
                 // - a Horde party walking into the Alliance capital, straight into the guards.
-                // Observed live 2026-08-24 on the first multi-muster run.
+                // Observed live 2026-08-24 on the first multi-muster run. (G18 later moved the
+                // Vault's registry door to Mirror Lake in Elwynn, outside the city, so this filter
+                // now lets Horde take it.)
                 //
                 // Keyed on AREA_FLAG_CAPITAL rather than the zone's team alone, because team
                 // alone is far too blunt: Scarlet Monastery sits in Tirisfal (Horde territory) and
@@ -4412,7 +4431,10 @@ std::string RandomPlayerbotMgr::SpawnTravelParty()
         o << "FORMED " << _travelParties.back().memberGuids.size() << " bots; leader "
           << leader->GetName() << " muster (" << (int)muster.x << "," << (int)muster.y << ","
           << (int)muster.z << ") -> dest (" << (int)dest.x << "," << (int)dest.y << ","
-          << (int)dest.z << ") territory " << territory;
+          << (int)dest.z << ") territory " << territory
+          // The real count. FORMED minus the terminal lines is not one: parties can leave the
+          // list without writing a verdict, and that arithmetic read 12 against a cap of 10.
+          << " active=" << _travelParties.size() << "/" << sPlayerbotAIConfig.travelPartyMaxConcurrent;
         F2Log(o.str());
     }
 

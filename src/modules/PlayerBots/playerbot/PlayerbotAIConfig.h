@@ -144,6 +144,7 @@ public:
     std::vector<uint32> populateSanctuaryZones;
     bool populateSoftenEnemyPvp;
     float populateSoftenReactMult;
+    bool randomBotForcePvp;
     // F2 — Overland travel parties (bots march city -> dungeon entrance, then disband)
     bool travelParties;
     bool travelPartyTestMode;

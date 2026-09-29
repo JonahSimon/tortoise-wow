@@ -5090,6 +5090,11 @@ AiPlayerbot.PopulateSanctuaryZones = "1497,1519,1537,1637,1638,1657,2040,5180"
 AiPlayerbot.PopulateSoftenEnemyPvp = 1
 AiPlayerbot.PopulateSoftenReactMult = 2.0
 #
+# Keep every random bot PvP flagged, as if it had typed /pvp, so a player can attack bots
+# anywhere and not only in contested zones. Bots still only fight back when attacked; this
+# does not make them hunt players or each other. Default off.
+AiPlayerbot.RandomBotForcePvp = 0
+#
 # =====================================================================
 #    OVERLAND TRAVEL PARTIES (F2) — custom feature, default off
 #    Bots muster at a city and march on foot to a dungeon entrance,
