@@ -5095,6 +5095,12 @@ AiPlayerbot.PopulateSoftenReactMult = 2.0
 # does not make them hunt players or each other. Default off.
 AiPlayerbot.RandomBotForcePvp = 0
 #
+# Let bots start world PvP, not only fight back: a bot attacks a nearby PvP-flagged enemy
+# player (20 yd, farther if it has more health), with AzerothCore's level-gap odds: never at
+# 5+ levels above, 25/50/75 % at 4/3/2 levels apart, always when closer. Battlegrounds are
+# unaffected. 0 = off (stock), 1 = real players only, 2 = bots too (AzerothCore parity).
+AiPlayerbot.WorldPvpSeek = 0
+#
 # =====================================================================
 #    OVERLAND TRAVEL PARTIES (F2) — custom feature, default off
 #    Bots muster at a city and march on foot to a dungeon entrance,

@@ -145,6 +145,7 @@ public:
     bool populateSoftenEnemyPvp;
     float populateSoftenReactMult;
     bool randomBotForcePvp;
+    uint32 worldPvpSeek;
     // F2 — Overland travel parties (bots march city -> dungeon entrance, then disband)
     bool travelParties;
     bool travelPartyTestMode;

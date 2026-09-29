@@ -53,6 +53,24 @@ std::list<ObjectGuid> EnemyPlayersValue::Calculate()
                 result = AI_VALUE(std::list<ObjectGuid>, "possible targets");
                 ApplyFilter(result, getOne);
             }
+
+            // World PvP (AiPlayerbot.WorldPvpSeek), ported from AzerothCore's mod-playerbots
+            // NearestEnemyPlayersValue + PossibleTargetsValue: outside a battleground, go after a
+            // nearby flagged enemy player instead of only fighting back. Off by default; the
+            // battleground-only scope above stays the stock behaviour.
+            if (result.empty() && !bot->InBattleGround() && sPlayerbotAIConfig.worldPvpSeek)
+            {
+                for (ObjectGuid const& guid : AI_VALUE(std::list<ObjectGuid>, "possible targets"))
+                {
+                    Unit* target = ai->GetUnit(guid);
+                    if (IsValid(target, bot) && IsWorldPvpTarget((Player*)target))
+                    {
+                        result.push_back(guid);
+                        if (getOne)
+                            break;
+                    }
+                }
+            }
         }
     }
 
@@ -98,6 +116,45 @@ bool EnemyPlayersValue::IsValid(Unit* target, Player* player)
     }
 
     return false;
+}
+
+// AzerothCore's open-world rules, in its order. IsValid() has already checked the target is a
+// hostile, attackable, visible player in line of sight.
+bool EnemyPlayersValue::IsWorldPvpTarget(Player* enemy)
+{
+    // 1 = only real players, 2 = bots too (AzerothCore parity).
+    if (sPlayerbotAIConfig.worldPvpSeek == 1 && !ai->IsRealPlayer(enemy))
+        return false;
+
+    // Only someone who can legally be attacked: an unflagged player is off limits.
+    if (!ai->IsOpposing(enemy) || !enemy->IsPvP())
+        return false;
+
+    if (sPlayerbotAIConfig.IsInPvpProhibitedZone(sServerFacade.GetAreaId(enemy)))
+        return false;
+
+    // Aggro range: 20 yd, or the bot's sight range when it has more health than the target.
+    float const aggro = bot->GetHealth() > enemy->GetHealth() ? sPlayerbotAIConfig.sightDistance : 20.0f;
+    if (!bot->IsWithinDist(enemy, aggro) || fabs(bot->GetPositionZ() - enemy->GetPositionZ()) >= 30.0f)
+        return false;
+
+    // Level gap: 5+ above never; +/-4 (or 5+ below) 25 %, +/-3 50 %, +/-2 75 %, closer always.
+    int32 const diff = int32(enemy->GetLevel()) - int32(bot->GetLevel());
+    if (diff >= 5)
+        return false;
+    uint32 const chance = (std::abs(diff) >= 4 || diff <= -5) ? 25 : std::abs(diff) == 3 ? 50 : std::abs(diff) == 2 ? 75 : 100;
+    if (chance == 100)
+        return true;
+
+    // Same roll for the same pair for two minutes (FNV-1a over both guids and the window), so the
+    // bot does not re-decide every tick until it eventually says yes.
+    uint64 hash = 14695981039346656037ULL;
+    for (uint64 v : { bot->GetObjectGuid().GetRawValue(), enemy->GetObjectGuid().GetRawValue(), uint64(time(nullptr) / 120) })
+    {
+        hash ^= v;
+        hash *= 1099511628211ULL;
+    }
+    return hash % 100 < chance;
 }
 
 void EnemyPlayersValue::ApplyFilter(std::list<ObjectGuid>& targets, bool getOne)
