@@ -57,8 +57,10 @@ std::list<ObjectGuid> EnemyPlayersValue::Calculate()
             // World PvP (AiPlayerbot.WorldPvpSeek), ported from AzerothCore's mod-playerbots
             // NearestEnemyPlayersValue + PossibleTargetsValue: outside a battleground, go after a
             // nearby flagged enemy player instead of only fighting back. Off by default; the
-            // battleground-only scope above stays the stock behaviour.
-            if (result.empty() && !bot->InBattleGround() && sPlayerbotAIConfig.worldPvpSeek)
+            // battleground-only scope above stays the stock behaviour. Only bots holding the
+            // "world pvp" strategy do it (AiFactory hands it to WorldPvpSeekBotPercent of free bots).
+            if (result.empty() && !bot->InBattleGround() && sPlayerbotAIConfig.worldPvpSeek &&
+                ai->HasStrategy("world pvp", BotState::BOT_STATE_NON_COMBAT))
             {
                 for (ObjectGuid const& guid : AI_VALUE(std::list<ObjectGuid>, "possible targets"))
                 {

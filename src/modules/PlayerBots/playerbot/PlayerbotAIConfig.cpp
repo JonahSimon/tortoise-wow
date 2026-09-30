@@ -247,6 +247,7 @@ bool PlayerbotAIConfig::Initialize()
     populateSoftenReactMult = config.GetFloatDefault("AiPlayerbot.PopulateSoftenReactMult", 2.0f);
     randomBotForcePvp = config.GetBoolDefault("AiPlayerbot.RandomBotForcePvp", false);
     worldPvpSeek = config.GetIntDefault("AiPlayerbot.WorldPvpSeek", 0);
+    worldPvpSeekBotPercent = config.GetIntDefault("AiPlayerbot.WorldPvpSeekBotPercent", 25);
     LoadList<std::vector<uint32> >(config.GetStringDefault("AiPlayerbot.PopulateStarterZones", "1,12,14,85,141,215,5225,5536"), populateStarterZones);
     LoadList<std::vector<uint32> >(config.GetStringDefault("AiPlayerbot.PopulateSanctuaryZones", "1497,1519,1537,1637,1638,1657,2040,5180"), populateSanctuaryZones);
     {
