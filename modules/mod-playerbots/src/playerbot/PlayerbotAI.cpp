@@ -6496,7 +6496,7 @@ ActivePiorityType PlayerbotAI::GetPriorityType()
     if (sServerFacade.IsInCombat(bot))
         return ActivePiorityType::IN_COMBAT;
 
-    if (HasPlayerNearby(WorldPosition(bot).getVisibilityDistance() + sPlayerbotAIConfig.reactDistance))
+    if (HasPlayerNearby(std::max(WorldPosition(bot).getVisibilityDistance() + sPlayerbotAIConfig.reactDistance, sPlayerbotAIConfig.activeNearPlayerRange)))
         return ActivePiorityType::NEARBY_PLAYER;
 
     if (sPlayerbotAIConfig.IsFreeAltBot(bot) || HasStrategy("travel once", BotState::BOT_STATE_NON_COMBAT))

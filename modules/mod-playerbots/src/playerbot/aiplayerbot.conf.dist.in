@@ -100,6 +100,12 @@ AiPlayerbot.DisableActivityPriorities = 0
 # Percentage of fully active bots. Default is 10, higher numbers may affect performance
 AiPlayerbot.botActiveAlone = 10
 
+# Bots within this many yards of a real player count as "nearby" and stay active (while the server
+# is not lagging), so the zones around a player stay awake while far-off bots idle down to
+# botActiveAlone. Only used with DisableActivityPriorities = 0.
+# Default: 0 (off, stock range = visibility distance + ReactDistance)
+AiPlayerbot.ActiveNearPlayerRange = 0
+
 # Limit random bot max level to online players max level + 5 and uses reference level 1 without a player.
 # AiPlayerbot.SyncLevelWithPlayers = 0
 # AiPlayerbot.SyncLevelMaxAbove = 5

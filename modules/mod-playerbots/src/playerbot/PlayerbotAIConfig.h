@@ -318,6 +318,7 @@ public:
     bool limitCombatActivity;
     bool guildOrderAlwaysActive;
     uint32 botActiveAlone;
+    float activeNearPlayerRange;
     uint32 diffWithPlayer;
     uint32 diffEmpty;
     uint32 minEnchantingBotLevel;

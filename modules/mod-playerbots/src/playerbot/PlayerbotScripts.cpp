@@ -263,6 +263,10 @@ class PlayerbotPlayerScript : public PlayerScript
             if (ai->HasPendingTransition() || ai->HasRealPlayerMaster() || ai->HasPlayerNearby(playerInterestRange))
                 return true;
 
+            // F2: a marching travel party is bots only, so nothing above keeps it at full update rate.
+            if (sPlayerbotAIConfig.travelParties && sRandomPlayerbotMgr.IsInTravelParty(const_cast<Player*>(player)))
+                return true;
+
             if (Group* group = const_cast<Player*>(player)->GetGroup())
             {
                 for (GroupReference* ref = group->GetFirstMember(); ref; ref = ref->next())
