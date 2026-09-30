@@ -40,6 +40,7 @@
 #include "Policies/Singleton.h"
 #include "SQLStorages.h"
 #include "Conditions.h"
+#include "BotTrainerIndex.h"
 
 #include <string>
 #include <map>
@@ -810,6 +811,12 @@ class ObjectMgr
         void LoadTaxiNodes();
         TaxiNodesEntry const* GetTaxiNodeEntry(uint32 id) const { return id < GetMaxTaxiNodeId() ? m_TaxiNodes[id].get() : nullptr; }
         uint32 GetMaxTaxiNodeId() const { return m_TaxiNodes.size(); }
+        void SetTaxiNodeEntry(uint32 id, std::unique_ptr<TaxiNodesEntry>& entry)
+        {
+            if (m_TaxiNodes.size() <= id)
+                m_TaxiNodes.resize(id + 1);
+            m_TaxiNodes[id] = std::move(entry);
+        }
 
         Quest const* GetQuestTemplate(uint32 quest_id) const
         {
@@ -965,6 +972,18 @@ class ObjectMgr
         void LoadCreatureTemplate(uint32 entry);
         void CheckCreatureTemplate(CreatureInfo* cInfo);
 
+        // The ported dungeon module walks every spawn once at load to join its
+        // boss list with coordinates. Read-only reference; the map is stable
+        // after startup, which is when the module reads it.
+        CreatureDataMap const& GetAllCreatureData() const { return m_CreatureDataMap; }
+        // AzerothCore chains spawns so one respawns another; this core's
+        // creature_linking answers a different question (aggro/despawn ties)
+        // and no table stores respawn links. An empty guid says "no link",
+        // which the one caller treats as the common case.
+        ObjectGuid GetLinkedRespawnGuid(ObjectGuid /*spawn*/) const { return ObjectGuid(); }
+        // The ported zone-line index walks every teleport trigger once at load.
+        AreaTriggerTeleportMap const& GetAllAreaTriggerTeleports() const { return m_AreaTriggerTeleportMap; }
+        std::vector<uint32> GetBotTrainerEntries(uint32 playerClass) const { return m_botTrainerIndex.Snapshot(playerClass); }
         CreatureInfo const* GetCreatureTemplate(uint32 id) const
         {
             auto itr = m_creatureInfoMap.find(id);
@@ -1515,6 +1534,10 @@ class ObjectMgr
         void LoadPlayerCacheData(uint32 lowGuid = 0);
         PlayerCacheData* GetPlayerDataByGUID(uint32 lowGuid) const;
         PlayerCacheData* GetPlayerDataByName(std::string const& name) const;
+        // Read-only view for modules that walk the whole cache (mod-dungeon-clear
+        // claims offline bot-account characters for its test roster). Same
+        // pattern as GetAllCreatureData / ScriptMgr::GetAllAreaTriggerScripts.
+        PlayerCacheDataMap const& GetAllPlayerCacheData() const { return m_playerCacheData; }
         void GetPlayerDataForAccount(uint32 accountId, std::vector<PlayerCacheData*>& data) const;
         PlayerCacheData* InsertPlayerInCache(Player *pPlayer);
         PlayerCacheData* InsertPlayerInCache(uint32 lowGuid, uint32 race, uint32 _class, uint32 uiGender, uint32 account, std::string const& name, uint32 level, uint32 zoneId, uint8 hardcoreStatus);
@@ -1819,6 +1842,7 @@ class ObjectMgr
         SoundEntryMap m_SoundEntriesMap;
         ItemPrototypeMap m_itemPrototypesMap;
         CreatureInfoMap m_creatureInfoMap;
+        BotTrainerIndex m_botTrainerIndex;
         GameObjectInfoMap m_GameObjectInfoMap;
 
         typedef std::vector<std::unique_ptr<SkillLineAbilityEntry>> SkillLineAbiilityStore;

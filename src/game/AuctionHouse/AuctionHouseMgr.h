@@ -176,6 +176,9 @@ class AuctionHouseObject
         AuctionEntryMapBounds GetAuctionsBounds_locked() { return { AuctionsMap.begin(), AuctionsMap.end() }; }
 
         std::vector<AuctionSnapshot> GetAuctionsSnapshot() const;
+        std::vector<AuctionSnapshot> GetAuctionsSnapshotPage(uint32 afterId, uint32 limit) const;
+        // World owner only. Shared native expiry/sale lifecycle; deletes entry.
+        void ExpireAuction(AuctionEntry* entry);
 
         uint32 GetCount() { Guard g(m_auctionsLock); return AuctionsMap.size(); }
 
@@ -217,6 +220,14 @@ class AuctionHouseMgr
         ~AuctionHouseMgr();
 
         typedef std::unordered_map<uint32, Item*> ItemMap;
+        typedef std::recursive_mutex ItemsMutex;
+        typedef std::lock_guard<ItemsMutex> ItemGuard;
+
+        // Auction searches hold this guard while consuming Item pointers. A
+        // lookup-only lock cannot protect a raw Item after GetAItem returns.
+        // Lock order when both auction and item state are needed remains
+        // AuctionHouseObject::m_auctionsLock, then this mutex.
+        ItemsMutex& GetItemsLock() const { return m_itemsLock; }
 
         AuctionHouseObject* GetAuctionsMap(AuctionHouseEntry const* house);
         // cmangos's AuctionHouseType-keyed lookup.
@@ -224,7 +235,7 @@ class AuctionHouseMgr
 
         Item* GetAItem(uint32 id)
         {
-            std::lock_guard<std::mutex> g(m_itemsLock);
+            ItemGuard g(m_itemsLock);
             ItemMap::const_iterator itr = mAitems.find(id);
             if (itr != mAitems.end())
             {
@@ -237,6 +248,7 @@ class AuctionHouseMgr
         void SendAuctionWonMail( AuctionEntry * auction );
         void SendAuctionSuccessfulMail( AuctionEntry * auction );
         void SendAuctionExpiredMail( AuctionEntry * auction );
+        void SendAuctionOutbiddedMail(AuctionEntry* auction);
         static uint32 GetAuctionDeposit(AuctionHouseEntry const* entry, uint32 time, Item *pItem);
 
         static uint32 GetAuctionHouseId(uint32 factionTemplateId);
@@ -260,7 +272,7 @@ class AuctionHouseMgr
         std::unordered_map<uint32, AuctionHouseObject*> m_mAuctionHouses;
         std::vector<std::unique_ptr<AuctionHouseObject>> m_vRealAuctionHouses;
 
-        mutable std::mutex  m_itemsLock;
+        mutable ItemsMutex  m_itemsLock;
         ItemMap             mAitems;
 };
 

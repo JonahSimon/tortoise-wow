@@ -43,15 +43,21 @@
 #include "Geometry.h"
 #include "GameObjectAI.h"
 #include "ScriptMgr.h"
+#include "ScriptObjects.h"
 #include "ZoneScript.h"
 #include "DynamicTree.h"
 #include "vmap/GameObjectModel.h"
 #include "GuidObjectScaling.h"
+#ifdef ENABLE_ELUNA
+#include "LuaEngine.h"
+#endif
 #include <G3D/Box.h>
 #include <G3D/CoordinateFrame.h>
 #include <G3D/Quat.h>
 #include "SuspiciousStatisticMgr.h"
 #include "PerfStats.h"
+#include "Group.h"
+#include "ObjectAccessor.h"
 
 bool QuaternionData::isUnit() const
 {
@@ -117,6 +123,25 @@ GameObject::~GameObject()
     --PerfStats::g_totalGameObjects;
 }
 
+Group* GameObject::GetGroupLootRecipient() const
+{
+    return m_playerGroupId ? sObjectMgr.GetGroupById(m_playerGroupId) : nullptr;
+}
+
+Player* GameObject::GetLootRecipient() const
+{
+    if (Group* group = GetGroupLootRecipient())
+        for (GroupReference* member = group->GetFirstMember(); member; member = member->next())
+            if (Player* player = member->getSource())
+                return player;
+
+    for (ObjectGuid guid : m_allowedLooters)
+        if (Player* player = ObjectAccessor::FindPlayer(guid))
+            return player;
+
+    return nullptr;
+}
+
 bool CanOnlyBeLootedByPlayersOnMapAtSpawn(uint32 entry)
 {
     switch (entry)
@@ -131,6 +156,8 @@ bool CanOnlyBeLootedByPlayersOnMapAtSpawn(uint32 entry)
 
 void GameObject::AddToWorld()
 {
+    bool const wasInWorld = IsInWorld();
+
     ///- Register the gameobject for guid lookup
     if (!IsInWorld())
     {
@@ -148,6 +175,12 @@ void GameObject::AddToWorld()
 
     if (!i_AI)
         AIM_Initialize();
+
+    if (!wasInWorld && IsInWorld())
+        ScriptRegistry<AllGameObjectScript>::ForEach([&](AllGameObjectScript* script)
+        {
+            script->OnGameObjectAddWorld(this);
+        });
 
     if (CanOnlyBeLootedByPlayersOnMapAtSpawn(GetEntry()))
     {
@@ -172,6 +205,11 @@ void GameObject::RemoveFromWorld()
     ///- Remove the gameobject from the accessor
     if (IsInWorld())
     {
+        ScriptRegistry<AllGameObjectScript>::ForEach([&](AllGameObjectScript* script)
+        {
+            script->OnGameObjectRemoveWorld(this);
+        });
+
         if (m_zoneScript)
             m_zoneScript->OnGameObjectRemove(this);
 
@@ -275,6 +313,11 @@ bool GameObject::Create(uint32 guidlow, uint32 name_id, Map *map, float x, float
     if (m_zoneScript)
         m_zoneScript->OnObjectCreate(this);
 
+#ifdef ENABLE_ELUNA
+    if (Eluna* e = GetEluna())
+        e->OnSpawn(this);
+#endif
+
     return true;
 }
 
@@ -337,6 +380,11 @@ void GameObject::Update(uint32 update_diff, uint32 /*p_time*/)
     ///- UpdateAI
     if (i_AI)
         i_AI->UpdateAI(update_diff);
+
+    ScriptRegistry<AllGameObjectScript>::ForEach([&](AllGameObjectScript* script)
+    {
+        script->OnGameObjectUpdate(this, update_diff);
+    });
 
     switch (m_lootState)
     {
@@ -1621,8 +1669,16 @@ void GameObject::Use(Unit* user)
                 {
                     DEBUG_FILTER_LOG(LOG_FILTER_AI_AND_MOVEGENSS, "Goober ScriptStart id %u for GO entry %u (GUID %u).", info->goober.eventId, GetEntry(), GetGUIDLow());
 
-                    if (!sScriptMgr.OnProcessEvent(info->goober.eventId, player, this, true))
+                    bool const handledByScript = sScriptMgr.OnProcessEvent(info->goober.eventId, player, this, true);
+                    if (!handledByScript)
                         GetMap()->ScriptsStart(sEventScripts, info->goober.eventId, player->GetObjectGuid(), GetObjectGuid());
+                    // INFO, deliberately: a bot party rang Zul'Farrak's gong (141832, event
+                    // 2488) and Gahz'rilla never appeared, with nothing between the click and
+                    // the summon visible in the journal (2026-09-05).
+                    sLog.outInfo("[GO] goober %u (%s) used by %s -> event %u %s, lootState %u, cooldownTime %u",
+                                 GetEntry(), GetName(), player->GetName(), info->goober.eventId,
+                                 handledByScript ? "handled by a C++ script" : "started as a DB event script",
+                                 uint32(getLootState()), uint32(m_cooldownTime));
                 }
                 else
                     GetMap()->ScriptsStart(sGameObjectScripts, GetGUIDLow(), user->GetObjectGuid(), GetObjectGuid());
@@ -1842,6 +1898,7 @@ void GameObject::Use(Unit* user)
             SetGoState(GO_STATE_ACTIVE);
 
             spellId = info->summoningRitual.spellId;
+            sLog.outInfo("[GO] ritual %u complete: %u unique users, casting spell %u by %s", GetEntry(), GetUniqueUseCount(), spellId, spellCaster ? spellCaster->GetName() : "nobody");
 
             // spell have reagent and mana cost but it not expected use its
             // it triggered spell in fact casted at currently channeled GO
@@ -2071,7 +2128,13 @@ void GameObject::Use(Unit* user)
     else
         targets.setUnitTarget(user);
 
-    spell->prepare(std::move(targets));
+    SpellCastResult const prepared = spell->prepare(std::move(targets));
+    // Rituals only: with bot parties the altar completed and nothing followed
+    // (2026-09-04, Uldaman keepers). The result code names the check that
+    // refused the cast.
+    if (GetGoType() == GAMEOBJECT_TYPE_SUMMONING_RITUAL && prepared != SPELL_CAST_OK)
+        sLog.outInfo("[GO] ritual %u spell %u refused: SpellCastResult %u (caster %s)",
+                     GetEntry(), spellId, uint32(prepared), spellCaster ? spellCaster->GetName() : "?");
 }
 
 // overwrite WorldObject function for proper name localization
@@ -2298,6 +2361,10 @@ bool GameObject::PlayerCanUse(Player* pPlayer)
 void GameObject::SetLootState(LootState state)
 {
     m_lootState = state;
+#ifdef ENABLE_ELUNA
+    if (Eluna* e = GetEluna())
+        e->OnLootStateChanged(this, state);
+#endif
     UpdateCollisionState();
 }
 
@@ -2305,6 +2372,10 @@ void GameObject::SetGoState(GOState state)
 {
     //SetByteValue(GAMEOBJECT_BYTES_1, 0, state); // 3.3.5
     SetUInt32Value(GAMEOBJECT_STATE, state);
+#ifdef ENABLE_ELUNA
+    if (Eluna* e = GetEluna())
+        e->OnGameObjectStateChanged(this, state);
+#endif
     UpdateCollisionState();
 }
 

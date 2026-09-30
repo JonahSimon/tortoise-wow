@@ -290,7 +290,9 @@ bool ChatHandler::HandleAccountSetGmLevelCommand(char* args)
     if (!ExtractInt32(&args, gm))
         return false;
 
-    if (gm < SEC_PLAYER || gm > SEC_ADMINISTRATOR)
+    // SEC_CONSOLE is reserved for the command-line console, but SEC_SIGMACHAD
+    // is a valid playable account rank and must be assignable here.
+    if (gm < SEC_PLAYER || gm > SEC_SIGMACHAD)
     {
         SendSysMessage(LANG_BAD_VALUE);
         SetSentErrorMessage(true);
@@ -991,7 +993,7 @@ bool ChatHandler::HandleListAurasCommand(char* /*args*/)
             {
                 PSendSysMessage(LANG_COMMAND_TARGET_AURADETAIL, holder->GetId(), aur->GetEffIndex(),
                     aur->GetModifier()->m_auraname, aur->GetAuraDuration(), aur->GetAuraMaxDuration(), aur->GetAuraPeriodicTimer(), aur->GetStackAmount(),
-                    name,
+                    name.c_str(),           // std::string through a printf vararg is an error under clang
                     (holder->IsPassive() ? passiveStr : ""), (talent ? talentStr : ""),
                     holder->GetCasterGuid().GetString().c_str());
             }
@@ -2644,7 +2646,7 @@ bool ChatHandler::HandleGuildHouseCommand(char* args)
     {
         CharacterDatabase.PExecute("REPLACE INTO guild_house VALUES (%u, %u, %f, %f, %f, %f);",
             guild_id, player->GetMapId(), player->GetPositionX(), player->GetPositionY(), player->GetPositionZ(), player->GetOrientation());
-        PSendSysMessage("The guild house teleport for %s was created.", sGuildMgr.GetGuildNameById(guild_id));
+        PSendSysMessage("The guild house teleport for %s was created.", sGuildMgr.GetGuildNameById(guild_id).c_str());
     }
     else
     {
@@ -5349,7 +5351,7 @@ bool ChatHandler::HandleInstanceStatsCommand(char* /*args*/)
 bool ChatHandler::HandleGMListFullCommand(char* /*args*/)
 {
     ///- Get the accounts with GM Level >0
-    QueryResult *result = LoginDatabase.Query("SELECT username, rank FROM account"
+    QueryResult *result = LoginDatabase.Query("SELECT username, `rank` FROM account"
                           " WHERE rank > 0");
     if (result)
     {
@@ -6705,6 +6707,28 @@ bool ChatHandler::HandleGMCommand(char* args)
         m_session->SendNotification(LANG_GM_OFF);
     }
 
+    return true;
+}
+
+// Enable/disable free flight for the selected player, or the issuing player
+// when no player target is selected. The Turtle player implementation already
+// owns the movement flags and heartbeat update; the command was simply absent.
+bool ChatHandler::HandleGMFlyCommand(char* args)
+{
+    bool value;
+    if (!ExtractOnOff(&args, value))
+    {
+        SendSysMessage(LANG_USE_BOL);
+        SetSentErrorMessage(true);
+        return false;
+    }
+
+    Player* target = GetSelectedPlayer();
+    if (!target)
+        target = m_session->GetPlayer();
+
+    target->SetFly(value);
+    PSendSysMessage(LANG_COMMAND_FLYMODE_STATUS, GetNameLink(target).c_str(), value ? "on" : "off");
     return true;
 }
 

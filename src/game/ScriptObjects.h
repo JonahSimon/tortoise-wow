@@ -143,10 +143,14 @@ enum PlayerHook
     PLAYERHOOK_ON_RELEASE_TO_CLIENT,
     PLAYERHOOK_IS_AI_CONTROLLED,
     PLAYERHOOK_IS_MACHINE_DRIVEN,
+    PLAYERHOOK_IS_UPDATE_CRITICAL,
     PLAYERHOOK_HAS_AI_FOLLOWERS,
     PLAYERHOOK_GET_ALLOWED_ROLES,
     PLAYERHOOK_SET_FORCED_ROLE,
     PLAYERHOOK_ON_CHAT_COMMAND,
+    PLAYERHOOK_CAN_USE_GROUP_CHAT,
+    PLAYERHOOK_ON_AI_UPDATE,
+    PLAYERHOOK_IS_AI_UPDATE_DUE,
     PLAYERHOOK_END
 };
 
@@ -170,6 +174,9 @@ class PlayerScript : public ScriptObject
         virtual void OnTalentsReset(Player* /*player*/, bool /*noCost*/) {}
         virtual void OnBeforeUpdate(Player* /*player*/, uint32 /*diff*/) {}
         virtual void OnUpdate(Player* /*player*/, uint32 /*diff*/) {}
+        // AI has its own cadence; never throttle gameplay/module OnUpdate hooks.
+        virtual void OnAIUpdate(Player* /*player*/, uint32 /*diff*/, bool /*minimal*/) {}
+        virtual bool IsAIUpdateDue(Player* /*player*/, uint32 /*diff*/) { return false; }
         virtual void OnMoneyChanged(Player* /*player*/, int32& /*amount*/) {}
         virtual void OnGiveXP(Player* /*player*/, uint32& /*amount*/, Unit* /*victim*/) {}
         virtual void OnReputationChange(Player* /*player*/, uint32 /*factionId*/, int32& /*standing*/) {}
@@ -212,6 +219,11 @@ class PlayerScript : public ScriptObject
         // a group member can be waited on.
         virtual bool IsMachineDriven(Player const* /*player*/) { return false; }
 
+        // Machine-driven characters normally run on a reduced cadence. Modules
+        // return true while a character is attached to a real player or doing
+        // latency-sensitive work so map catch-up passes keep it responsive.
+        virtual bool IsUpdateCritical(Player const* /*player*/) { return false; }
+
         // Whether this *human* player commands puppets of his own. Distinct from
         // IsAIControlled: the master is a real player, his followers are not.
         virtual bool HasAIFollowers(Player const* /*player*/) { return false; }
@@ -229,6 +241,15 @@ class PlayerScript : public ScriptObject
         // the message - it is a notification, not a filter.
         virtual void OnChatCommand(Player* /*player*/, uint32 /*type*/, std::string const& /*msg*/,
                                    uint32 /*lang*/, std::string const& /*to*/) {}
+
+        // May this line go out to the group? A module that consumes its own
+        // control traffic (an addon command channel) answers false and the
+        // core drops the line after the module acted on it - without this the
+        // whole party sees every button press, or the old workaround rewrites
+        // the type to a value the opcode switch cannot handle and the log
+        // fills with unknown-message-type lines.
+        virtual bool CanUseGroupChat(Player* /*player*/, uint32 /*type*/, uint32 /*lang*/,
+                                     std::string& /*msg*/) { return true; }
 };
 
 class CreatureScript : public ScriptObject, public UpdatableScript<Creature>
@@ -573,6 +594,7 @@ class AllGameObjectScript : public ScriptObject
         virtual void OnGameObjectRemoveWorld(GameObject* /*go*/) {}
         virtual void OnGameObjectUpdate(GameObject* /*go*/, uint32 /*diff*/) {}
         virtual bool CanGameObjectGossipHello(Player* /*player*/, GameObject* /*go*/) { return false; }
+        virtual bool CanGameObjectGossipSelect(Player* /*player*/, GameObject* /*go*/, uint32 /*sender*/, uint32 /*action*/, char const* /*code*/) { return false; }
         virtual GameObjectAI* GetGameObjectAI(GameObject* /*go*/) const { return nullptr; }
 };
 
@@ -744,6 +766,9 @@ class GroupScript : public ScriptObject
     protected:
         explicit GroupScript(char const* name) : ScriptObject(name) { ScriptRegistry<GroupScript>::AddScript(this); }
     public:
+        virtual void OnCreate(Group* /*group*/, ObjectGuid /*leaderGuid*/, uint8 /*groupType*/) {}
+        virtual void OnInviteMember(Group* /*group*/, ObjectGuid /*guid*/) {}
+        virtual bool CanMemberAccept(Group* /*group*/, Player* /*player*/) { return true; }
         virtual void OnAddMember(Group* /*group*/, ObjectGuid /*guid*/) {}
         virtual void OnRemoveMember(Group* /*group*/, ObjectGuid /*guid*/, uint8 /*method*/) {}
         virtual void OnChangeLeader(Group* /*group*/, ObjectGuid /*newLeaderGuid*/, ObjectGuid /*oldLeaderGuid*/) {}
@@ -759,6 +784,8 @@ class GuildScript : public ScriptObject
         virtual void OnRemoveMember(Guild* /*guild*/, Player* /*player*/, bool /*isDisbanding*/, bool /*isKicked*/) {}
         virtual void OnCreate(Guild* /*guild*/, Player* /*leader*/, std::string const& /*name*/) {}
         virtual void OnDisband(Guild* /*guild*/) {}
+        virtual void OnMotdChanged(Guild* /*guild*/, std::string const& /*motd*/) {}
+        virtual void OnInfoChanged(Guild* /*guild*/, std::string const& /*info*/) {}
 };
 
 class MailScript : public ScriptObject

@@ -17,6 +17,7 @@
  */
 
 #include "MoveMap.h"
+#include "ArchitectureDiagnostics.h"
 #include "GridMap.h"
 #include "Creature.h"
 #include "PathFinder.h"
@@ -57,6 +58,21 @@ PathInfo::PathInfo(const Unit* owner) :
 PathInfo::~PathInfo()
 {
     //DEBUG_FILTER_LOG(LOG_FILTER_PATHFINDING, "++ PathInfo::~PathInfo() for %u \n", m_sourceUnit->GetGUID());
+}
+
+void PathInfo::ResetForNewRequest()
+{
+    clear();
+    m_type = PATHFIND_BLANK;
+    m_useStraightPath = false;
+    m_forceDestination = false;
+    m_pointPathLimit = MAX_POINT_PATH_LENGTH;
+    m_startPosition = m_endPosition = m_actualEndPosition = Vector3(0.f, 0.f, 0.f);
+    m_transport = nullptr;
+    m_navMesh = nullptr;
+    m_navMeshQuery = nullptr;
+    m_targetAllowedFlags = 0;
+    createFilter();
 }
 
 void PathInfo::setPathLengthLimit(float dist)
@@ -103,6 +119,7 @@ bool PathInfo::calculate(Vector3 const& start, Vector3 dest, bool forceDest, boo
         return false;
     }
 
+    TurtleDiagnostics::Scope diagnosticPath(TurtleDiagnostics::Path);
     // A m_navMeshQuery object is not thread safe, but a same PathInfo can be shared between threads.
     // So need to get a new one.
     MMAP::MMapManager* mmap = MMAP::MMapFactory::createOrGetMMapManager();
@@ -116,8 +133,7 @@ bool PathInfo::calculate(Vector3 const& start, Vector3 dest, bool forceDest, boo
     else
         m_navMeshQuery = mmap->GetNavMeshQuery(m_sourceUnit->GetMapId());
 
-    if (m_navMeshQuery)
-        m_navMesh = m_navMeshQuery->getAttachedNavMesh();
+    m_navMesh = m_navMeshQuery ? m_navMeshQuery->getAttachedNavMesh() : nullptr;
 
     m_pathPoints.clear();
 
@@ -678,6 +694,7 @@ uint32 PathInfo::fixupCorridor(dtPolyRef* path, const uint32 npath, const uint32
 
 int fixupShortcuts(dtPolyRef* path, int npath, dtNavMeshQuery const* navQuery)
 {
+    auto navRead = navQuery->getAttachedNavMesh()->acquireRead();
     if (npath < 3)
         return npath;
 

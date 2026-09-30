@@ -1,0 +1,437 @@
+#ifndef _RandomPlayerbotMgr_H
+#define _RandomPlayerbotMgr_H
+
+#include <mutex>
+#include "Common.h"
+#include <unordered_set>
+#include "PlayerbotAIBase.h"
+#include "PlayerbotMgr.h"
+#include "playerbot/PlayerbotAIConfig.h"
+#include "WorldPosition.h"
+#include <map>
+#include <list>
+#include <deque>
+#include "IncrementalFilter.h"
+#include "PopulationSpatialIndex.h"
+#include "WorkSlice.h"
+#include "StaticLocationIndex.h"
+
+class WorldPacket;
+class Player;
+class Unit;
+class Object;
+class Item;
+
+class CachedEvent
+{
+public:
+    CachedEvent() : value(0), lastChangeTime(0), validIn(0), data("") {}
+    CachedEvent(const CachedEvent& other) : value(other.value), lastChangeTime(other.lastChangeTime), validIn(other.validIn), data(other.data) {}
+    CachedEvent(uint32 value, uint32 lastChangeTime, uint32 validIn, std::string data = "") : value(value), lastChangeTime(lastChangeTime), validIn(validIn), data(data) {}
+
+public:
+    bool IsEmpty() { return !lastChangeTime; }
+
+public:
+    uint32 value, lastChangeTime, validIn;
+    std::string data;
+};
+
+class PerformanceMonitorOperation;
+
+//https://gist.github.com/bradley219/5373998
+
+class botPIDImpl;
+class botPID
+{
+public:
+    // Kp -  proportional gain
+    // Ki -  Integral gain
+    // Kd -  derivative gain
+    // dt -  loop interval time
+    // max - maximum value of manipulated variable
+    // min - minimum value of manipulated variable
+    botPID(double dt, double max, double min, double Kp, double Ki, double Kd);
+    void adjust(double Kp, double Ki, double Kd);
+    void reset();
+   
+    double calculate(double setpoint, double pv);
+    ~botPID();
+
+private:
+    botPIDImpl* pimpl;
+};
+
+class RandomPlayerbotMgr : public PlayerbotHolder
+{
+    public:
+        void UpdateTeleportPlans();
+        RandomPlayerbotMgr();
+        virtual ~RandomPlayerbotMgr() override;
+        static RandomPlayerbotMgr& instance()
+        {
+            static RandomPlayerbotMgr instance;
+            return instance;
+        }
+
+        virtual void UpdateAIInternal(uint32 elapsed, bool minimal = false) override;
+private:
+        void ScaleBotActivity();
+        void LogPlayerLocation();
+        void DelayedFacingFix();
+        void LoginFreeBots();
+public:
+        static void DatabasePing(QueryResult* result, uint32 pingStart, std::string db);
+        void SetDatabaseDelay(std::string db, uint32 delay) {databaseDelay[db] = delay;}
+        uint32 GetDatabaseDelay(std::string db) {if(databaseDelay.find(db) == databaseDelay.end()) return 0; return databaseDelay[db];}
+
+        void LoadNamedLocations();
+        bool AddNamedLocation(std::string const& name, WorldLocation const& location);
+        bool GetNamedLocation(std::string const& name, WorldLocation& location);
+
+        static bool HandlePlayerbotConsoleCommand(ChatHandler* handler, char const* args);
+        // F2 - Overland travel parties: bots muster at a city and march to a dungeon entrance.
+        std::string SpawnTravelParty();  // returns the leader's name, "" on failure
+        bool IsInTravelParty(Player* bot);  // public: PlayerbotAI keeps marching bots active
+        bool IsRandomBot(Player* bot);
+        bool IsRandomBot(uint32 bot);
+        bool IsFreeBot(Player* bot) { return IsRandomBot(bot) || sPlayerbotAIConfig.IsFreeAltBot(bot); }
+        bool IsFreeBot(uint32 bot) { return IsRandomBot(bot) || sPlayerbotAIConfig.IsFreeAltBot(bot); }
+        void InstaRandomize(Player* bot);
+        void Randomize(Player* bot);
+        void RandomizeFirst(Player* bot);
+        void UpdateGearSpells(Player* bot);
+        // Pinned bots: kept logged in, never relocated. See PinnedBots in the config.
+        bool IsPinnedBot(uint32 guidLow);
+        void EnsurePinnedBotsOnline();
+
+        void ScheduleTeleport(uint32 bot, uint32 time = 0);
+        void ScheduleChangeStrategy(uint32 bot, uint32 time = 0);
+    private:
+        std::set<uint32> m_pinnedBots;
+        bool m_pinnedBotsResolved = false;
+        void ResolvePinnedBots();
+    public:
+        void HandleCommand(uint32 type, const std::string& text, Player& fromPlayer, std::string channelName = "", Team team = TEAM_BOTH_ALLOWED, uint32 lang = LANG_UNIVERSAL, const std::string& to = "");
+        std::string HandleRemoteCommand(std::string request);
+        void OnPlayerLogout(Player* player);
+        void OnPlayerLogin(Player* player);
+        void OnPlayerLoginError(uint32 bot);
+        uint32 BackgroundLoginBudget(uint32 requested);
+        Player* GetRandomPlayer();
+        PlayerBotMap& GetPlayers() { return players; };
+        Player* GetPlayer(uint32 playerGuid);
+        void PrintStats(uint32 requesterGuid);
+        double GetBuyMultiplier(Player* bot);
+        double GetSellMultiplier(Player* bot);
+        void AddTradeDiscount(Player* bot, Player* master, int32 value);
+        void SetTradeDiscount(Player* bot, Player* master, uint32 value);
+        uint32 GetTradeDiscount(Player* bot, Player* master);
+        void Refresh(Player* bot);
+        void RandomTeleportForLevel(Player* bot, bool activeOnly);
+        void RandomTeleportForLevel(Player* bot) { return RandomTeleportForLevel(bot, true); }
+        void RandomTeleportForRpg(Player* bot, bool activeOnly);
+        void RandomTeleportForRpg(Player* bot) { return RandomTeleportForRpg(bot, true); }
+        int GetMaxAllowedBotCount();
+        bool ProcessBot(Player* player);
+        void Revive(Player* player);
+        void ChangeStrategy(Player* player);
+        uint32 GetValue(Player* bot, std::string type);
+        uint32 GetValue(uint32 bot, std::string type);
+        int32 GetValueValidTime(uint32 bot, std::string event);
+        std::string GetData(uint32 bot, std::string type);
+        void SetValue(uint32 bot, std::string type, uint32 value, std::string data = "", int32 validIn = -1);
+        void SetValue(Player* bot, std::string type, uint32 value, std::string data = "", int32 validIn = -1);
+        void Remove(Player* bot);
+        void Hotfix(Player* player, uint32 version);
+        uint32 GetBattleMasterEntry(Player* bot, BattleGroundTypeId bgTypeId, bool fake = false);
+        const CreatureDataPair* GetCreatureDataByEntry(uint32 entry);
+        uint32 GetCreatureGuidByEntry(uint32 entry);
+        void LoadBattleMastersCache();
+        std::map<uint32, std::map<uint32, std::map<uint32, bool> > > NeedBots;
+        std::map<uint32, std::map<uint32, std::map<uint32, uint32> > > BgBots;
+        std::map<uint32, std::map<uint32, std::map<uint32, uint32> > > VisualBots;
+        std::map<uint32, std::map<uint32, std::map<uint32, uint32> > > BgPlayers;
+        std::map<uint32, std::map<uint32, std::map<uint32, std::map<uint32, uint32> > > > ArenaBots;
+        std::map<uint32, std::map<uint32, std::map<uint32, uint32> > > Rating;
+        std::map<uint32, std::map<uint32, std::map<uint32, uint32> > > Supporters;
+        std::map<Team, std::vector<uint32>> LfgDungeons;
+        void CheckBgQueue();
+        void CheckLfgQueue();
+        void CheckPlayers();
+        void SaveCurTime();
+        void SyncEventTimers();
+        void AddOfflineGroupBots();
+        static Item* CreateTempItem(uint32 item, uint32 count, Player const* player, uint32 randomPropertyId = 0);
+        static InventoryResult CanEquipUnseenItem(Player* player, uint8 slot, uint16& dest, uint32 item);
+
+        bool AddRandomBot(uint32 bot);
+        bool CreateRandomBot(const std::string& name, uint8 race, uint8 cls, uint32 level);
+        bool DeleteRandomBot(ObjectGuid guid);
+        virtual void MovePlayerBot(uint32 guid, PlayerbotHolder* newHolder) override;
+
+        std::map<Team, std::map<BattleGroundTypeId, std::list<uint32> > > getBattleMastersCache() { return BattleMastersCache; }
+
+        float getActivityMod() { return activityMod; }
+        float getActivityPercentage() { return activityMod * 100.0f; }
+        void setActivityPercentage(float percentage) { activityMod = percentage / 100.0f; }
+
+        void PrintTeleportCache();
+
+        void AddFacingFix(uint32 mapId, uint32 instanceId, ObjectGuid guid) { facingFix[mapId][instanceId].push_back(std::make_pair(guid,time(0))); }
+
+        bool arenaTeamsDeleted, guildsDeleted = false;
+
+        std::mutex m_ahActionMutex;
+
+        const std::vector<AuctionEntry>& GetAhPrices(uint32 itemId) {
+            static const std::vector<AuctionEntry> emptyVector; // Avoid returning dangling refs
+            auto it = ahMirror.find(itemId);
+            return (it != ahMirror.end()) ? it->second : emptyVector;}
+        uint32 GetPlayersLevel() { return playersLevel; }
+    protected:
+        virtual void OnBotLoginInternal(Player * const bot) override;
+    private:
+        //pid values are set in constructor
+        botPID pid = botPID(1, 50, -50, 0, 0, 0);
+        float activityMod = 0.25;
+        std::map<std::string, uint32> databaseDelay;
+        uint32 GetEventValue(uint32 bot, std::string event);
+        std::string GetEventData(uint32 bot, std::string event);
+        uint32 SetEventValue(uint32 bot, std::string event, uint32 value, uint32 validIn, std::string data = "");
+        std::list<uint32> GetBots();
+        std::list<uint32> GetBgBots(uint32 bracket);
+        time_t BgCheckTimer;
+        time_t LfgCheckTimer;
+        time_t PlayersCheckTimer;
+        time_t EventTimeSyncTimer;
+        time_t OfflineGroupBotsTimer;
+        uint32 AddRandomBots();
+        bool ProcessBot(uint32 bot);
+        void ScheduleRandomize(uint32 bot, uint32 time);
+        void RandomTeleport(Player* bot);
+        void RandomTeleport(Player* bot, std::vector<WorldLocation> &locs, bool hearth = false, bool activeOnly = false);
+        struct TeleportPlan
+        {
+            uint32 guid = 0, map = 0, instance = 0, generation = 0;
+            uint8 level = 0, race = 0, stage = 0;
+            bool hearth = false, activeOnly = false;
+            // These cache vectors are populated once at startup and never
+            // replaced. Only the front plan materializes a candidate copy.
+            std::vector<WorldLocation> const* source = nullptr;
+            std::vector<ai::WorldPosition> candidates, friendly;
+            size_t cursor = 0, attempt = 0;
+            IncrementalFilter filter;
+            std::unique_ptr<PopulationSpatialIndex> occupancy;
+        };
+        bool AdvanceTeleportPlan(TeleportPlan& plan, WorkSlice& slice);
+        std::deque<TeleportPlan> teleportPlans;
+        std::unordered_set<uint32> pendingTeleportGuids;
+        struct TeleportArea { uint32 zone = 0, area = 0, homeTeam = 0; };
+        StaticLocationIndex<TeleportArea> teleportAreas;
+        void PrepareTeleportAreaIndex();
+        TeleportArea const* GetTeleportArea(ai::WorldPosition const& location) const;
+        uint32 GetZoneLevel(uint16 mapId, float teleX, float teleY, float teleZ);
+        void PrepareTeleportCache();
+        typedef std::list<std::string> (RandomPlayerbotMgr::*ConsoleCommandHandler) (std::string param);
+        typedef std::list<std::string> (RandomPlayerbotMgr::*ConsolePlayerCommandHandler) (Player*);
+
+        std::string consoleCmdParams;
+
+        std::list<std::string> HandleHelp(std::string param);
+        std::list<std::string> HandleConsoleReset(std::string param);
+        std::list<std::string> HandleConsoleStats(std::string param);
+        std::list<std::string> HandleConsoleReload(std::string param);
+        std::list<std::string> HandleConsoleUpdate(std::string param);
+        std::list<std::string> HandleConsolePid(std::string param);
+        std::list<std::string> HandleConsoleDiff(std::string param);
+        std::list<std::string> HandleConsoleCleanMap(std::string param);
+        std::list<std::string> HandleConsoleLoginDebug(std::string param);
+        std::list<std::string> HandleConsolePathCheck(std::string param);
+        // Override virtual methods from PlayerbotHolder
+        virtual uint32 GetOrCreateAccount(Player* master, std::string& error) override;
+        virtual void OnBotDeleted(uint32 botGuid, uint32 accountId) override;
+
+    public:
+        // The ACTIVE rotation set (the ai_playerbot_random_bots 'add' rows
+        // GetBots() caches). Public read-only copy for mod-dungeon-clear's
+        // test roster, which must claim characters from OUTSIDE this set:
+        // the rotation logs these in and out on its own schedule and yanked
+        // a live run's tank mid-dungeon.
+        std::list<uint32> GetActiveRotationBots() { return GetBots(); }
+
+        // Logins owned by an external driver: mod-dungeon-clear's test
+        // harness logs its party in through THIS holder (PlayerbotMgr's
+        // ownership gate refuses foreign characters), but the characters are
+        // bot-account stock, so the random add-event logout policy saw them
+        // as expired strays and reaped them mid-run after the two-minute
+        // group grace ("leader tank vanished"). The owner marks each login
+        // and clears the mark in its teardown.
+        // Guarded: the DC test harness writes this from the map thread that
+        // owns the run while the rotation reads it from its own update, and an
+        // unordered_set is not safe across that. The same shape unguarded -
+        // Player::m_visibleGUIDs - segfaulted the World thread on 2026-08-31
+        // (crash_2026-08-31_11-01-01, a find() hashing against a set another
+        // thread was writing). Here the damage would be quieter and worse: a
+        // missed lookup silently un-shields a running party's bot.
+        void SetExternallyManaged(uint32 lowGuid, bool on)
+        {
+            std::lock_guard<std::mutex> lock(m_externallyManagedLock);
+            if (on)
+                m_externallyManaged.insert(lowGuid);
+            else
+                m_externallyManaged.erase(lowGuid);
+        }
+        bool IsExternallyManaged(uint32 lowGuid) const
+        {
+            std::lock_guard<std::mutex> lock(m_externallyManagedLock);
+            return m_externallyManaged.find(lowGuid) != m_externallyManaged.end();
+        }
+    private:
+        std::unordered_set<uint32> m_externallyManaged;
+        mutable std::mutex m_externallyManagedLock;
+    public:
+
+        static std::string GetCommandTexts(const std::string& command);
+        static std::unordered_map<std::string, std::string> GetCommandTexts();
+        std::list<std::string> HandleRandomizeFirst(Player* bot);
+        std::list<std::string> HandleUpdateGearSpells(Player* bot);
+        std::list<std::string> HandleRefresh(Player* bot);
+        std::list<std::string> HandleRandomTeleportForLevel(Player* bot);
+        std::list<std::string> HandleRandomTeleportForRpg(Player* bot);
+        std::list<std::string> HandleRevive(Player* bot);
+        std::list<std::string> HandleRandomTeleport(Player* bot);
+        std::list<std::string> HandleChangeStrategy(Player* bot);
+        std::list<std::string> HandleRemove(Player* bot);
+
+        void MirrorAh();
+    private:
+        PlayerBotMap players;
+        int processTicks;
+        std::unordered_map<std::string, WorldLocation> namedLocations;
+        std::map<uint8, std::vector<WorldLocation> > locsPerLevelCache;
+
+        // Populate-Around-Players (F1)
+        struct ZoneDemand
+        {
+            uint32 zoneId = 0;
+            uint32 target = 0;
+            float allianceShare = 0.5f;
+            bool allowAlliance = true;
+            bool allowHorde = true;
+            uint32 playersAlliance = 0;
+            uint32 playersHorde = 0;
+            uint32 minPlayerLevel = 0;
+            uint32 maxPlayerLevel = 0;
+            uint32 curAlliance = 0;
+            uint32 curHorde = 0;
+            uint32 curPeer = 0;
+            uint32 curTexture = 0;
+        };
+        std::unordered_map<uint32, ZoneDemand> _playerZones;
+        uint32 _playerZoneRefreshTime = 0;
+        void RefreshPlayerZones();
+        bool IsPopulatePeer(ZoneDemand const& demand, uint32 level) const;
+        std::vector<WorldLocation> GetPlayerZoneTeleportLocations(Player* bot);
+
+        // F2 - Overland travel parties
+        struct TravelParty
+        {
+            ObjectGuid leaderGuid;
+            // Kept as a string so telemetry can still name the party after the leader object is
+            // gone - which is exactly when LEADER LOST fires and you most want to know who it was.
+            std::string leaderName;
+            std::vector<ObjectGuid> memberGuids;  // includes the leader
+            uint32 mapId = 0;
+            float destX = 0.f, destY = 0.f, destZ = 0.f;
+            uint32 deadline = 0;        // unix time; hard anti-stuck timeout
+            uint32 lastLogTime = 0;     // telemetry throttle
+            float maxMemberDist = 0.f;  // farthest follower from the leader
+            // Aim the leader at the FAR end of its navmesh path so the core walks it as one
+            // long spline; re-issuing MovePoint every tick restarts the spline and looks choppy.
+            float curTgtX = 0.f, curTgtY = 0.f, curTgtZ = 0.f;
+            bool curTgtSet = false;
+            float bestDist = 1e9f;        // closest 3D approach to the destination so far
+            uint32 bestProgressTime = 0;  // last time bestDist improved (anti-circling)
+            // MoveTo is the better mover but it silently delivers no travel in places (its path
+            // gets clipped at hostiles and hazards, or collapses in makeShortCut). Judge it on
+            // ground covered between orders, and demote to raw MovePoint when it stops delivering.
+            float lastOrderX = 0.f, lastOrderY = 0.f;
+            bool lastOrderSet = false;
+            uint8 deadOrders = 0;      // consecutive orders that moved the leader < 5 yards
+            bool forceRawMove = false; // sticky until an order actually covers ground
+            // A party that walks through hostile territory has to be allowed to stop and fight.
+            bool inCombat = false;     // any member was fighting as of last tick
+            uint32 combatStart = 0;    // unix time the current fight began
+            uint32 recoverUntil = 0;   // hold here until this time so the crew can eat and drink
+            // G6: deaths are a setback, not the end of the march. Counted only for the LEADER,
+            // because a follower that dies is revived and snapped back at no cost to the route,
+            // while a leader dying repeatedly means the party is walking into something it
+            // cannot survive and should give up with a verdict rather than a revive loop.
+            uint8 leaderDeaths = 0;
+            // G5b: where crossing this door puts a player, straight out of areatrigger_teleport.
+            // 0 = no instance behind this destination (the hand-set TravelPartyDest path), so the
+            // party stops at the door as before.
+            uint32 insideMap = 0;
+            float insideX = 0.f, insideY = 0.f, insideZ = 0.f, insideO = 0.f;
+            std::string destName;      // for the ENTERED line; SELECTED is far up the log by then
+            // Entering is not instant: TeleportTo across maps is asynchronous, and the group has
+            // to survive until every bot is on the instance map or they bind to separate copies
+            // of it. Non-zero means "teleports issued, waiting"; the march logic is skipped.
+            uint32 enteringUntil = 0;
+            // A pathfind that failed cannot succeed again 300 ms later from the same spot: the
+            // mesh does not change. The failure branch nudges 10 yd and leaves curTgtSet false,
+            // which re-fires the whole probe fan on the very next tick - measured at 35361 of
+            // 35686 failed pathfinds retrying within one second, ~566k wasted Detour queries in a
+            // 5 h soak. Hold off until the nudge has had time to land.
+            // ponytail: fixed 2 s, well under the 90 s stall detector so no verdict moves.
+            uint32 retryPathAfter = 0;
+        };
+        std::vector<TravelParty> _travelParties;
+        uint32 _travelPartyTime = 0;
+        void UpdateTravelParties();               // per tick: march, arrive, time out
+        void DisbandTravelParty(TravelParty& p);  // tear down group + restore bot AI
+
+        std::map<uint32, std::vector<WorldLocation> > rpgLocsCache;
+		std::map<uint32, std::map<uint32, std::vector<WorldLocation> > > rpgLocsCacheLevel;
+        std::map<uint32, std::map<uint32, std::vector<std::pair<ObjectGuid, WorldLocation>> > > innCacheLevel;
+        std::map<Team, std::map<BattleGroundTypeId, std::list<uint32> > > BattleMastersCache;
+        std::map<uint32, std::map<std::string, CachedEvent> > eventCache;
+        // Shared by map-owned bot actions and world maintenance. Never hold
+        // this mutex across a synchronous database read or gameplay callback.
+        std::mutex eventCacheMutex;
+        uint64 eventCacheGeneration = 0;
+        std::unordered_set<uint32> loadedEventBots;
+        uint32 eventPruneCursor = 0;
+        uint64 expiredEventsReleased = 0;
+        void PruneEventCacheSlice();
+        BarGoLink* loginProgressBar;
+        std::list<uint32> currentBots;
+        std::list<uint32> arenaTeamMembers;
+        uint32 bgBotsCount;
+        uint32 playersLevel = 0;
+        uint32 botCount = 0;
+        uint32 activeBots = 0;
+        uint32 maintenanceCursorGuid = 0;
+        uint32 loginCursorGuid = 0;
+        uint32 memoryAdmissionSampleMs = 0, memoryAdmissionMb = 0;
+        bool memoryAdmissionPaused = false;
+
+        std::unordered_map<uint32, std::vector<std::pair<int32,int32>>> playerBotMoveLog;
+        typedef std::unordered_map <uint32, std::list<float>> botPerformanceMetric;
+        std::unordered_map<std::string, botPerformanceMetric> botPerformanceMetrics;
+        
+        std::vector<std::pair<uint32, uint32>> RpgLocationsNear(const WorldLocation pos, const std::map<uint32, std::map<uint32, std::vector<std::string>>>& areaNames, uint32 radius = 2000);
+        void PushMetric(botPerformanceMetric& metric, const uint32 bot, const float value, const uint32 maxNum = 60) const;
+        float GetMetricDelta(botPerformanceMetric& metric) const;
+
+        bool showLoginWarning;
+        std::unordered_map<uint32, std::unordered_map<uint32, std::vector<std::pair<ObjectGuid, time_t>>>> facingFix;
+
+        //                   itemId,             buyout, count
+        std::unordered_map < uint32, std::vector<AuctionEntry>> ahMirror;
+};
+
+#define sRandomPlayerbotMgr RandomPlayerbotMgr::instance()
+
+#endif

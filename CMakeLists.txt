@@ -40,6 +40,20 @@ option(TBB_DEBUG "Use TBB debug librairies" OFF)
 option(USE_ANTICHEAT "Use anticheat" ON)
 option(USE_DISCORD_BOT "Use Discord Bot" OFF)
 option(USE_SCRIPTS "Compile scripts" ON)
+option(BUILD_ELUNA "Build the Eluna Lua scripting engine" ON)
+option(BUILD_ELUNA_TESTS "Build the Eluna Lua runtime smoke test" ON)
+set(ELUNA_LUA_VERSION "lua52" CACHE STRING "Lua runtime used by Eluna (lua51, lua52, lua53, or lua54)")
+set_property(CACHE ELUNA_LUA_VERSION PROPERTY STRINGS lua51 lua52 lua53 lua54)
+
+if(BUILD_ELUNA)
+  if(NOT EXISTS "${CMAKE_SOURCE_DIR}/src/modules/Eluna/LuaEngine.h")
+    message(FATAL_ERROR
+      "Eluna submodule is missing. Run: git submodule update --init --recursive src/modules/Eluna")
+  endif()
+  if(BUILD_ELUNA_TESTS)
+    enable_testing()
+  endif()
+endif()
 set(MODULES "disabled" CACHE STRING "Module build mode: disabled, static, dynamic, or default.")
 option(USE_EXTRACTORS "Compile extractors" OFF)
 option(USE_TRACY "Use Tracy Profiling" OFF)
@@ -48,12 +62,35 @@ option(USE_REALMMERGE "Compile helper tool for merging character databases" OFF)
 option(USE_ADDRESS_SANITIZER "Enable clang address sanitizer - debug feature that slowing down server, but allow to catch memory corruption" OFF)
 option(ENABLE_PROFILING "(Windows only) Enable Optick integration, which allows to profile CPU and Memory. Also disabling some async code" OFF)
 option(ENABLE_LSAN "Enables Leak Sanitizer" OFF)
+option(ENABLE_LTO "Enable link-time optimization for release builds" ON)
+option(PROFILE_GENERATE "Build an instrumented release binary for profile-guided optimization" OFF)
+option(PROFILE_USE "Optimize a release binary using collected profile data" OFF)
+if(PROFILE_GENERATE AND PROFILE_USE)
+  message(FATAL_ERROR "PROFILE_GENERATE and PROFILE_USE cannot both be enabled")
+endif()
 # Allow enabling official Turtle addon support
 option(ALLOW_TURTLE_ADDONS "Allow Turtle addons" ON)
 # Build cmangos/playerbots — bot AI vendored under src/modules/PlayerBots/.
 # When ON, mangosd links the bot subsystem; runtime activation is gated by
 # AiPlayerbot.Enabled in aiplayerbot.conf.
 option(BUILD_PLAYERBOTS "Build the cmangos/playerbots subsystem" OFF)
+# BUILD_PLAYERBOTS without any module build leaves the host's playerbot hooks
+# undefined at link time: PlayerbotStubs.cpp is only compiled when the
+# subsystem is OFF, and the real World::InitPlayerbotsAtStartup, the .bot /
+# .ahbot / .perfmon chat handlers and BotActionLog_* live in
+# modules/mod-playerbots. A from-scratch Linux build with the documented cmake
+# line (no -DMODULES) died exactly there (2026-09-05). The subsystem IS a
+# module, so switch the module build on for it.
+if(BUILD_PLAYERBOTS AND MODULES STREQUAL "disabled")
+  # Enable ONLY the requested subsystem, not every optional module. Changing
+  # MODULES globally also activates DungeonClear and adds a mandatory config
+  # file to existing deployments that previously ran just mod-playerbots.
+  if(NOT DEFINED MODULE_MOD_PLAYERBOTS OR MODULE_MOD_PLAYERBOTS STREQUAL "default")
+    set(MODULE_MOD_PLAYERBOTS "static" CACHE STRING "Build mode for mod-playerbots" FORCE)
+  elseif(MODULE_MOD_PLAYERBOTS STREQUAL "disabled")
+    message(FATAL_ERROR "BUILD_PLAYERBOTS=ON conflicts with MODULE_MOD_PLAYERBOTS=disabled")
+  endif()
+endif()
 
 ConfigureModuleBuildOptions()
 
@@ -91,6 +128,7 @@ if(USE_LIBCURL)
   find_package(CURL REQUIRED)
   #add_definitions(-D_HAS_AUTO_PTR_ETC) # for VS2017 ACE support, won't do any harm to other compilers
   #set(CMAKE_CXX_STANDARD 17)
+
   #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /std:c++17")
 endif()
 
@@ -104,11 +142,34 @@ endif()
 
 # Giperion: Enable C++17
 set(CMAKE_CXX_STANDARD 17)
+
+# Detour: virtual query filters. Off, dtQueryFilter::getCost is non-virtual and
+# a derived filter (mod-dungeon-clear routes around no-go zones with one) would
+# compile against the base and silently never be called - paths would ignore
+# every zone the filter exists to avoid. Global on purpose: every translation
+# unit that includes DetourNavMeshQuery.h must agree on the class layout, or
+# this is an ODR break. Costs a virtual call per polygon test in all
+# pathfinding; AzerothCore ships with exactly this on.
+add_definitions(-DDT_VIRTUAL_QUERYFILTER=1)
+
 if(MSVC)
+# Do NOT append compiler flags here expecting them to survive. Further down,
+# the WIN32 branch does
+#     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS_RELEASE} /wd4996 ... /MP /EHsc")
+# which expands CMAKE_CXX_FLAGS_RELEASE, not CMAKE_CXX_FLAGS, and therefore
+# REPLACES everything set up here. I put /DDT_VIRTUAL_QUERYFILTER=1 on this
+# line on 2026-09-02 and it was silently discarded; gabtorman found the real
+# cause and moved it onto that later assignment, where it belongs. The
+# /std:c++17 below is likewise dropped there - harmless, since
+# CMAKE_CXX_STANDARD 17 above already covers it.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /std:c++17")
 endif(MSVC)
 if(NOT MSVC)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
+# The Detour virtual-filter switch rides the same flags line the C++ standard
+# does: add_definitions provably does not survive to the subdirectory targets
+# in this tree (checked in flags.make), this line provably does.
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DDT_VIRTUAL_QUERYFILTER=1")
 endif()
 # Giperion: Set Edit and Continue by default for all windows debug builds
 if(MSVC AND NOT USE_ADDRESS_SANITIZER)
@@ -351,9 +412,18 @@ else()
     set(rev_date "1970-01-01 00:00:00 +0000")
     set(rev_hash "unknown")
   endif()
-  
-  configure_file(${CMAKE_CURRENT_SOURCE_DIR}/cmake/revision.h.cmake ${CMAKE_CURRENT_SOURCE_DIR}/src/shared/revision.h)
 endif()
+
+# Keep generated revision metadata out of the tracked source tree.
+# The generated include directory is placed first so <revision.h>
+# resolves to this build-specific header rather than src/shared/revision.h.
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/generated")
+configure_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/revision.h.cmake"
+  "${CMAKE_BINARY_DIR}/generated/revision.h"
+  @ONLY
+)
+include_directories(BEFORE "${CMAKE_BINARY_DIR}/generated")
 
 message(STATUS "")
 message(STATUS "Core revision: ${rev_hash} ${rev_date} ")
@@ -380,7 +450,7 @@ endif()
 if(PROFILE_GENERATE)
   message(STATUS "PGO profile           : Generate")
 elseif(PROFILE_USE)
-  message(STATUS "PGO profile           : ${GCC_PROFILE_USE}")
+  message(STATUS "PGO profile           : Use")
 else()
   message(STATUS "PGO profile           : Disabled")
 endif()
@@ -410,6 +480,12 @@ if(USE_SCRIPTS)
   message(STATUS "Build scripts         : Yes (default)")
 else()
   message(STATUS "Build scripts         : No")
+endif()
+
+if(BUILD_ELUNA)
+  message(STATUS "Build Eluna           : Yes (Lua ${ELUNA_LUA_VERSION})")
+else()
+  message(STATUS "Build Eluna           : No")
 endif()
 
 if(MODULES_MODULE_LIST)
@@ -501,7 +577,10 @@ elseif(WIN32)
   # Disable warnings in Visual Studio 8 and above and add /MP
   if(MSVC AND NOT CMAKE_GENERATOR MATCHES "Visual Studio 7")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS_RELEASE} /wd4996 /wd4355 /wd4244 /wd4985 /wd4267 /MP /EHsc")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS_RELEASE} /wd4996 /wd4355 /wd4244 /wd4267 /MP /EHsc")
+    # This assignment replaces the earlier CMAKE_CXX_FLAGS value. Keep the
+    # virtual-query-filter switch here too, so Detour and every consumer agree
+    # on dtQueryFilter's layout and DcRouteFilter can override getCost.
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS_RELEASE} /wd4996 /wd4355 /wd4244 /wd4267 /MP /EHsc /DDT_VIRTUAL_QUERYFILTER=1")
   endif()
 endif()
 
@@ -525,9 +604,25 @@ if(MSVC)
   # .pdb beside it.
   set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} /Zi")
   set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /Zi")
+
+  if(ENABLE_LTO OR PROFILE_GENERATE OR PROFILE_USE)
+    set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} /GL")
+    set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /GL")
+  endif()
+
   foreach(_linker EXE SHARED MODULE)
     set(CMAKE_${_linker}_LINKER_FLAGS_RELEASE
         "${CMAKE_${_linker}_LINKER_FLAGS_RELEASE} /DEBUG /OPT:REF /OPT:ICF")
+    if(PROFILE_GENERATE)
+      set(CMAKE_${_linker}_LINKER_FLAGS_RELEASE
+          "${CMAKE_${_linker}_LINKER_FLAGS_RELEASE} /LTCG:PGINSTRUMENT /GENPROFILE")
+    elseif(PROFILE_USE)
+      set(CMAKE_${_linker}_LINKER_FLAGS_RELEASE
+          "${CMAKE_${_linker}_LINKER_FLAGS_RELEASE} /LTCG:PGOPTIMIZE /USEPROFILE")
+    elseif(ENABLE_LTO)
+      set(CMAKE_${_linker}_LINKER_FLAGS_RELEASE
+          "${CMAKE_${_linker}_LINKER_FLAGS_RELEASE} /LTCG")
+    endif()
   endforeach()
 endif()
 
@@ -537,16 +632,23 @@ set(CMAKE_INSTALL_RPATH ${LIBS_DIR})
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 if(WIN32)
+  if(DEP_ARCH STREQUAL "x64")
+    set(OPENSSL_DLL_SUFFIX "-x64")
+  else()
+    set(OPENSSL_DLL_SUFFIX "")
+  endif()
   install(
     FILES
-      ${CMAKE_SOURCE_DIR}/dep/windows/lib/${DEP_ARCH}_release/libeay32.dll
+      ${CMAKE_SOURCE_DIR}/dep/windows/lib/${DEP_ARCH}_release/libcrypto-1_1${OPENSSL_DLL_SUFFIX}.dll
+      ${CMAKE_SOURCE_DIR}/dep/windows/lib/${DEP_ARCH}_release/libssl-1_1${OPENSSL_DLL_SUFFIX}.dll
       ${CMAKE_SOURCE_DIR}/dep/windows/lib/${DEP_ARCH}_release/libmySQL.dll
     DESTINATION ${LIBS_DIR}
     CONFIGURATIONS Release
   )
   install(
     FILES
-      ${CMAKE_SOURCE_DIR}/dep/windows/lib/${DEP_ARCH}_debug/libeay32.dll
+      ${CMAKE_SOURCE_DIR}/dep/windows/lib/${DEP_ARCH}_debug/libcrypto-1_1${OPENSSL_DLL_SUFFIX}.dll
+      ${CMAKE_SOURCE_DIR}/dep/windows/lib/${DEP_ARCH}_debug/libssl-1_1${OPENSSL_DLL_SUFFIX}.dll
       ${CMAKE_SOURCE_DIR}/dep/windows/lib/${DEP_ARCH}_debug/libmySQL.dll
     DESTINATION ${LIBS_DIR}
     CONFIGURATIONS Debug
@@ -648,13 +750,19 @@ set_property(DIRECTORY APPEND PROPERTY
 message(STATUS "Build flags (RELEASE) : ${CMAKE_CXX_FLAGS_RELEASE}")
 message(STATUS "Build flags (DEBUG)   : ${CMAKE_CXX_FLAGS_DEBUG}")
 
-
+if(MSVC)
+    add_compile_definitions(_USE_MATH_DEFINES)
+endif()
 add_subdirectory(src)
 add_subdirectory(dep)
 add_subdirectory(modules)
 
 if(TARGET mangosd AND TARGET modules)
   target_link_libraries(mangosd modules)
+endif()
+
+if(TARGET mangosd AND TARGET modules_playerbots)
+  target_link_libraries(mangosd modules_playerbots)
 endif()
 
 if(TARGET mangosd AND WORLDSERVER_DYNAMIC_MODULES_DEPENDENCIES)
@@ -687,75 +795,10 @@ if(TARGET mangosd)
   endif()
 endif()
 
-# cmangos/playerbots vendored module
-if (BUILD_PLAYERBOTS)
-    message(STATUS "BUILD_PLAYERBOTS=ON - adding cmangos/playerbots vendored module at src/modules/PlayerBots/")
-    set(PCH ${USE_PCH})
-    add_subdirectory(src/modules/PlayerBots)
-    # Vendor-tree feature gates the playerbots source expects:
-    #   CMANGOS         - selects the cmangos codepath in vendored headers
-    #                     (vs. TrinityCore / MaNGOS-Zero alternates).
-    #   MANGOSBOT_ZERO  - Classic (1.12). Switches level caps, talent trees,
-    #                     spell ranges. Use MANGOSBOT_ONE for TBC,
-    #                     MANGOSBOT_TWO for WotLK if re-vendoring later.
-    #   ENABLE_PLAYERBOTS - turns the subsystem on inside the vendor tree's
-    #                       own ifdef walls.
-    target_compile_definitions(playerbots PRIVATE CMANGOS MANGOSBOT_ZERO ENABLE_PLAYERBOTS)
-    target_include_directories(playerbots PUBLIC
-        ${CMAKE_SOURCE_DIR}/src/modules/PlayerBots/cmangos-compat-stubs
-        ${CMAKE_SOURCE_DIR}/src/game
-        ${CMAKE_SOURCE_DIR}/src/game/AI
-        ${CMAKE_SOURCE_DIR}/src/game/AuctionHouse
-        ${CMAKE_SOURCE_DIR}/src/game/Battlegrounds
-        ${CMAKE_SOURCE_DIR}/src/game/Chat
-        ${CMAKE_SOURCE_DIR}/src/game/Commands
-        ${CMAKE_SOURCE_DIR}/src/game/Database
-        ${CMAKE_SOURCE_DIR}/src/game/Group
-        ${CMAKE_SOURCE_DIR}/src/game/Guild
-        ${CMAKE_SOURCE_DIR}/src/game/Handlers
-        ${CMAKE_SOURCE_DIR}/src/game/LFG
-        ${CMAKE_SOURCE_DIR}/src/game/Mail
-        ${CMAKE_SOURCE_DIR}/src/game/Maps
-        ${CMAKE_SOURCE_DIR}/src/game/Maps/Pool
-        ${CMAKE_SOURCE_DIR}/src/game/Movement
-        ${CMAKE_SOURCE_DIR}/src/game/Movement/spline
-        ${CMAKE_SOURCE_DIR}/src/game/Objects
-        ${CMAKE_SOURCE_DIR}/src/game/OutdoorPvP
-        ${CMAKE_SOURCE_DIR}/src/game/PacketBroadcast
-        ${CMAKE_SOURCE_DIR}/src/game/Protocol
-        ${CMAKE_SOURCE_DIR}/src/game/Spells
-        ${CMAKE_SOURCE_DIR}/src/game/Threat
-        ${CMAKE_SOURCE_DIR}/src/game/Transports
-        ${CMAKE_SOURCE_DIR}/src/game/vmap
-        ${CMAKE_SOURCE_DIR}/src/shared
-        ${CMAKE_SOURCE_DIR}/src/shared/Config
-        ${CMAKE_SOURCE_DIR}/src/shared/Database
-        ${CMAKE_SOURCE_DIR}/src/shared/Log
-        ${CMAKE_SOURCE_DIR}/src/shared/Util
-        ${CMAKE_SOURCE_DIR}/src/framework
-        ${CMAKE_SOURCE_DIR}/src/framework/Network
-        # ACE_ROOT is only the search hint a builder may pass in; the path that
-        # find_package(ACE) actually resolved is ACE_INCLUDE_DIR, which is what
-        # src/game and src/shared use. Without it this target gets no ACE include
-        # path whenever ACE was found any other way - via the environment, a
-        # system install, or CMake's own search. On Linux that goes unnoticed
-        # because ACE sits in /usr/include; on Windows the build fails outright.
-        ${ACE_ROOT}
-        ${ACE_INCLUDE_DIR}
-        # Same story as ACE above: BOOST_ROOT is the hint, Boost_INCLUDE_DIRS is
-        # what find_package actually resolved.
-        ${BOOST_ROOT}
-        ${Boost_INCLUDE_DIRS}
-        ${CMAKE_SOURCE_DIR}/dep/include/g3dlite
-        ${MYSQL_INCLUDE_DIR}
-    )
-    if (WIN32)
-        target_include_directories(playerbots PUBLIC
-            ${CMAKE_SOURCE_DIR}/dep/windows/include
-            ${CMAKE_SOURCE_DIR}/dep/windows/include/mysql
-        )
-    endif()
-endif()
+# cmangos/playerbots is a MODULE now: modules/mod-playerbots.
+# Its build lives in that module's own CMakeLists.txt and
+# mod-playerbots.cmake. BUILD_PLAYERBOTS still switches it on and off,
+# and still gates src/game/PlayerbotStubs.cpp.
 
 if (USE_EXTRACTORS OR USE_REALMMERGE)
     add_subdirectory(tools)

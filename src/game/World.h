@@ -28,6 +28,7 @@
 
 #include "Common.h"
 #include "Timer.h"
+#include "TickDiffWindow.h"
 #include "Policies/Singleton.h"
 #include "SharedDefines.h"
 #include "Nostalrius.h"
@@ -46,9 +47,14 @@
 #include <memory>
 #include <unordered_map>
 #include <atomic>
+#include <mutex>
 #include <thread>
 #include <functional>
 #include <any>
+
+#ifdef ENABLE_ELUNA
+#include "ElunaMgr.h"
+#endif
 
 class Object;
 class WorldSession;
@@ -59,6 +65,9 @@ class World;
 class ChannelBroadcaster;
 // forward-decl so World::GetLFGQueue() return type compiles.
 class LFGQueue;
+#ifdef ENABLE_ELUNA
+class Eluna;
+#endif
 // forward-decl GraveYardData (defined in ObjectMgr.h)
 // so World::WorldGraveyardManagerStub method signature parses without needing the full type.
 struct GraveYardData;
@@ -149,6 +158,13 @@ enum eConfigUInt32Values
     CONFIG_UINT32_AV_MIN_PLAYERS_IN_QUEUE,
     CONFIG_UINT32_AV_INITIAL_MAX_PLAYERS,
     CONFIG_UINT32_INACTIVE_PLAYERS_SKIP_UPDATES,
+    CONFIG_UINT32_HIBERNATED_PLAYERS_SKIP_UPDATES,
+    CONFIG_UINT32_MACHINE_DRIVEN_ADAPTIVE_STRIDE,
+    CONFIG_UINT32_MACHINE_DRIVEN_TARGET_DIFF,
+    CONFIG_UINT32_MACHINE_DRIVEN_MAX_STRIDE_MULTIPLIER,
+    CONFIG_UINT32_MACHINE_DRIVEN_CRITICAL_REFRESH_INTERVAL,
+    CONFIG_UINT32_MACHINE_DRIVEN_MAX_CATCHUP_DIFF,
+    CONFIG_UINT32_MACHINE_DRIVEN_AUTONOMOUS_ACTIVE_STRIDE,
     CONFIG_UINT32_ITEM_INSTANTSAVE_QUALITY,
     CONFIG_UINT32_ITEM_RARELOOT_QUALITY,
     CONFIG_UINT32_WHISP_DIFF_ZONE_MIN_LEVEL,
@@ -174,9 +190,31 @@ enum eConfigUInt32Values
     CONFIG_UINT32_DYN_RESPAWN_MIN_RESPAWN_TIME_INDOORS,
     CONFIG_UINT32_DYN_RESPAWN_AFFECT_RESPAWN_TIME_BELOW,
     CONFIG_UINT32_DYN_RESPAWN_AFFECT_LEVEL_BELOW,
+    CONFIG_UINT32_MAP_OBJECT_BUILD_THREADS,
+    CONFIG_UINT32_MAP_OBJECT_BUILD_CHUNK,
+    CONFIG_UINT32_MAP_CELL_THREADS,
+    CONFIG_UINT32_MAP_IDLE_BOT_THREADS,
+    CONFIG_UINT32_MAP_CELL_CHUNK_SIZE,
+    CONFIG_UINT32_MAP_CELL_MIN_PARALLEL,
+    CONFIG_UINT32_MAP_CELL_MAX_CHUNKS,
+    CONFIG_UINT32_MAP_CELL_MAX_WAIT,
+    CONFIG_UINT32_MAP_CELL_FALLBACK_SECONDS,
+    CONFIG_UINT32_MAP_BACKGROUND_OBJECT_SKIP,
     CONFIG_UINT32_MTCELLS_THREADS,
     CONFIG_UINT32_MTCELLS_SAFEDISTANCE,
     CONFIG_UINT32_MAPUPDATE_INSTANCED_UPDATE_THREADS,
+    CONFIG_UINT32_MAPUPDATE_WORKER_THREADS,
+    CONFIG_UINT32_MAPUPDATE_IDLE_AI_BATCH,
+    CONFIG_UINT32_MAP_IDLE_AI_BUDGET,
+    CONFIG_UINT32_MAP_IDLE_AI_MIN,
+    CONFIG_UINT32_MAP_IDLE_AI_ADVANCE,
+    CONFIG_UINT32_MAP_IDLE_AI_MAX_DEFERRAL,
+    CONFIG_UINT32_MAP_IDLE_AI_RECOVERY,
+    CONFIG_UINT32_ADAPTIVE_MEMORY_SOFT,
+    CONFIG_UINT32_ADAPTIVE_MEMORY_HARD,
+    CONFIG_UINT32_ADAPTIVE_MEMORY_RECOVER,
+    CONFIG_UINT32_DB_CALLBACK_BUDGET_MS,
+    CONFIG_UINT32_WORLD_TASK_BUDGET_MS,
     CONFIG_UINT32_MAPUPDATE_UPDATE_PACKETS_DIFF,
     CONFIG_UINT32_MAPUPDATE_UPDATE_PLAYERS_DIFF,
     CONFIG_UINT32_MAPUPDATE_UPDATE_CELLS_DIFF,
@@ -199,6 +237,7 @@ enum eConfigUInt32Values
     CONFIG_UINT32_PERFLOG_SLOW_PACKET,
     CONFIG_UINT32_PERFLOG_SLOW_MAP_PACKETS,
     CONFIG_UINT32_PERFLOG_SLOW_PACKET_BCAST,
+    CONFIG_UINT32_PERFLOG_PLAYER_SUMMARY_INTERVAL,
     CONFIG_UINT32_ASYNC_QUERIES_TICK_TIMEOUT,
     CONFIG_UINT32_LOGIN_PER_TICK,
     CONFIG_UINT32_ANTICRASH_REARM_TIMER,
@@ -721,6 +760,7 @@ enum eConfigBoolValues
     CONFIG_BOOL_ENABLE_DYNAMIC_VISIBILITIES,
     CONFIG_BOOL_PRIORITY_QUEUE_ENABLE_IP_PENALTY,
     CONFIG_BOOL_LOAD_LOCALES,
+    CONFIG_BOOL_LOAD_SPELLS_FROM_SQL,
     CONFIG_BOOL_ENABLE_FACTION_BALANCE,
     CONFIG_BOOL_BLOCK_ALL_HANZI,
     CONFIG_BOOL_HOLIDAY_EVENT,
@@ -915,7 +955,7 @@ private:
 class World
 {
     public:
-        static volatile uint32 m_worldLoopCounter;
+        static std::atomic<uint32> m_worldLoopCounter;
 
         friend class AccountDataWrapper;
 
@@ -931,10 +971,9 @@ class World
         // post-load work is WorldScript::OnStartup, both fired from World.cpp.
         void InitPlayerbotsAtStartup();
         uint32 GetCurrentMSTime() const;
-        // GetMaxDiff: cmangos exposes max diff for performance dashboard. Stub returns 0.
-        uint32 GetMaxDiff() const { return 0; }
-        // GetCurrentDiff: cmangos exposes current frame diff. Stub returns 100ms.
-        uint32 GetCurrentDiff() const { return 100; }
+        // Measured tick intervals in milliseconds; max/average share 50 ticks.
+        uint32 GetMaxDiff() const { return m_tickDiffs.Maximum(); }
+        uint32 GetCurrentDiff() const { return m_tickDiffs.Current(); }
         // GetGraveyardManager: cmangos has it on World too. Stub returns a manager-stub.
         // Templated GetGraveyardMap() defers instantiation of std::map<uint32, GraveYardData> to call site,
         // so World.h consumers don't need the full GraveYardData definition.
@@ -1313,6 +1352,10 @@ class World
         std::atomic_uint64_t m_packetsCount[NUM_MSG_TYPES] = {};
         std::atomic_uint64_t m_packetsSize[NUM_MSG_TYPES] = {};
 
+#ifdef ENABLE_ELUNA
+        Eluna* GetEluna() const { return sElunaMgr->Get(m_elunaInfo); }
+#endif
+
     protected:
         void _UpdateGameTime();
         // callback for UpdateRealmCharacters
@@ -1336,7 +1379,7 @@ class World
         bool configNoReload(bool reload, eConfigFloatValues index, char const* fieldname, float defvalue);
         bool configNoReload(bool reload, eConfigBoolValues index, char const* fieldname, bool defvalue);
 
-        static volatile bool m_stopEvent;
+        static std::atomic<bool> m_stopEvent;
         static uint8 m_ExitCode;
         uint32 m_ShutdownTimer = 0;
         uint32 m_ShutdownMask = 0;
@@ -1385,7 +1428,7 @@ class World
 
         std::unordered_map<uint32, std::unordered_set<std::string>> m_fingerprintAccounts;
 
-        std::vector<uint32> m_lastDiffs;
+        TickDiffWindow<50> m_tickDiffs;
 
         uint32 m_diffThresholdHits = 0;
         uint32 m_lastDiff = 0;
@@ -1458,7 +1501,10 @@ class World
         std::unordered_map<uint32, std::unordered_set<time_t>> m_autoPDumpCharTimes;
         std::set<uint32> m_lockedCharacterGuids;
         std::thread m_asyncPacketsThread;
-        bool m_canProcessAsyncPackets;
+        std::atomic<bool> m_canProcessAsyncPackets;
+        // The reader must finish before sessions or their players are removed.
+        // Recursive because reconnect handling moves a session while updating it.
+        std::recursive_mutex m_sessionUpdateMutex;
         void ProcessAsyncPackets();
         std::thread m_shopThread;
 
@@ -1477,7 +1523,10 @@ class World
         std::unique_ptr<MovementBroadcaster> m_broadcaster;
         std::unique_ptr<ChannelBroadcaster> m_ChannelBroadcaster;
 
-        std::unique_ptr<ThreadPool> m_updateThreads;
+
+#ifdef ENABLE_ELUNA
+        ElunaInfo m_elunaInfo;
+#endif
 };
 
 extern uint32 realmID;

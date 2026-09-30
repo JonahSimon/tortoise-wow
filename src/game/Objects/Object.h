@@ -33,10 +33,17 @@
 #include "DBCEnums.h"
 #include "Utilities/EventProcessor.h"
 #include "DynamicVisibilityMgr.h"
+#include "MovementViewerSet.h"
 
 #include <set>
 #include <string>
 #include <array>
+#include <memory>
+
+#ifdef ENABLE_ELUNA
+#include "LuaValue.h"
+#include "ElunaEventMgr.h"
+#endif
 
 #include "MoveSpline.h"
 
@@ -159,6 +166,10 @@ class ZoneScript;
 class Transport;
 class SpellEntry;
 class Spell;
+#ifdef ENABLE_ELUNA
+class Eluna;
+class ElunaEventProcessor;
+#endif
 
 typedef std::unordered_map<Player *, UpdateData> UpdateDataMapType;
 struct FactionTemplateEntry;
@@ -411,6 +422,7 @@ class Object
 
         uint8 GetTypeId() const { return m_objectTypeId; }
         bool isType(TypeMask mask) const { return (mask & m_objectType); }
+        bool IsType(TypeMask mask) const { return isType(mask); }
 
         virtual void BuildCreateUpdateBlockForPlayer(UpdateData *data, Player *target) const;
         void SendCreateUpdateToPlayer(Player* player);
@@ -428,7 +440,7 @@ class Object
         void BuildOutOfRangeUpdateBlock(UpdateData *data) const;
         void BuildMovementUpdateBlock(UpdateData * data, uint8 flags = 0) const;
 
-        void BuildMovementUpdate(ByteBuffer * data, uint8 updateFlags) const;
+        void BuildMovementUpdate(ByteBuffer * data, uint8 updateFlags, bool includeSpline = true) const;
         void BuildValuesUpdate(uint8 updatetype, ByteBuffer *data, UpdateMask *updateMask, Player *target ) const;
         void BuildUpdateDataForPlayer(Player* pl, UpdateDataMapType& update_players);
 
@@ -786,6 +798,10 @@ class WorldObject : public Object
                 explicit UpdateHelper(WorldObject * obj) : m_obj(obj) {}
                 ~UpdateHelper() { }
 
+                // Read without resetting: deferred background work must retain
+                // the real elapsed time used by spell, aura and regen clocks.
+                uint32 ElapsedTime(uint32 now) const { return m_obj->m_updateTracker.timeElapsed(now); }
+
                 void Update(uint32 time_diff)
                 {
                     m_obj->Update(m_obj->m_updateTracker.timeElapsed(), time_diff);
@@ -795,6 +811,23 @@ class WorldObject : public Object
                 void UpdateRealTime(uint32 now, uint32 time_diff)
                 {
                     m_obj->Update(m_obj->m_updateTracker.timeElapsed(now), time_diff);
+                    m_obj->m_updateTracker.ResetTo(now);
+                }
+
+                // Preserve true wall-clock time for player timers while
+                // bounding the map/AI time replayed after a deferred update.
+                void UpdateRealTime(uint32 now, uint32 time_diff, uint32 max_time_diff)
+                {
+                    uint32 const bounded_diff = max_time_diff ? std::min(time_diff, max_time_diff) : time_diff;
+                    m_obj->Update(m_obj->m_updateTracker.timeElapsed(now), bounded_diff);
+                    m_obj->m_updateTracker.ResetTo(now);
+                }
+
+                void UpdateRealTimeBounded(uint32 now, uint32 max_time_diff)
+                {
+                    uint32 const elapsed = m_obj->m_updateTracker.timeElapsed(now);
+                    uint32 const bounded_diff = max_time_diff ? std::min(elapsed, max_time_diff) : elapsed;
+                    m_obj->Update(elapsed, bounded_diff);
                     m_obj->m_updateTracker.ResetTo(now);
                 }
 
@@ -1003,6 +1036,39 @@ class WorldObject : public Object
         bool IsWalking() const { return m_movementInfo.HasMovementFlag(MOVEFLAG_WALK_MODE); }
         bool IsWalkingBackward() const { return m_movementInfo.HasMovementFlag(MOVEFLAG_BACKWARD); }
         bool IsMoving() const { return m_movementInfo.HasMovementFlag(MOVEFLAG_MASK_MOVING); }
+        // AzerothCore spellings, for module code written against that core.
+        bool isMoving() const { return IsMoving(); }
+        float GetExactDist2d(float px, float py) const
+        {
+            float const dx = GetPositionX() - px, dy = GetPositionY() - py;
+            return std::sqrt(dx*dx + dy*dy);
+        }
+        float GetExactDist(float px, float py, float pz) const
+        {
+            float const dx = GetPositionX() - px, dy = GetPositionY() - py, dz = GetPositionZ() - pz;
+            return std::sqrt(dx*dx + dy*dy + dz*dz);
+        }
+        float GetExactDist2d(Position const& p) const { return GetExactDist2d(p.x, p.y); }
+        float GetExactDist(Position const& p) const { return GetExactDist(p.x, p.y, p.z); }
+        float GetExactDist2d(Position const* p) const { return GetExactDist2d(p->x, p->y); }
+        float GetExactDist(Position const* p) const { return GetExactDist(p->x, p->y, p->z); }
+        float GetExactDist2d(WorldObject const* o) const { return GetExactDist2d(o->GetPositionX(), o->GetPositionY()); }
+        float GetExactDistSq(WorldObject const* o) const { float const d = GetExactDist(o); return d * d; }
+        float GetExactDistSq(float px, float py, float pz) const { float const d = GetExactDist(px, py, pz); return d * d; }
+        // AzerothCore appends incOwnRadius/incTargetRadius; this core's check
+        // already includes both radii, which is also that call's default.
+        bool IsWithinDist(WorldObject const* obj, float dist, bool is3D, bool /*incOwnRadius*/, bool /*incTargetRadius*/) const
+        { return IsWithinDist(obj, dist, is3D); }
+        // Dynamic-object identity, AzerothCore spellings.
+        bool IsDynamicObject() const { return GetTypeId() == TYPEID_DYNAMICOBJECT; }
+        class DynamicObject* ToDynObject() { return IsDynamicObject() ? reinterpret_cast<DynamicObject*>(this) : nullptr; }
+        DynamicObject const* ToDynObject() const { return IsDynamicObject() ? reinterpret_cast<DynamicObject const*>(this) : nullptr; }
+        float GetExactDist(WorldObject const* o) const { return GetExactDist(o->GetPositionX(), o->GetPositionY(), o->GetPositionZ()); }
+        // AzerothCore prints objects for debug output; here it is name and guid.
+        std::string ToString() const { return std::string(GetName()) + " (" + GetObjectGuid().GetString() + ")"; }
+        // Phasing arrived with The Burning Crusade. Everything on this core
+        // shares one phase, so ported phase comparisons always match.
+        uint32 GetPhaseMask() const { return 1; }
         bool IsSwimming() const { return m_movementInfo.HasMovementFlag(MOVEFLAG_SWIMMING); }
         bool IsMovingButNotWalking() const { return IsMoving() && !(IsWalking() || IsWalkingBackward()); }
 
@@ -1019,6 +1085,13 @@ class WorldObject : public Object
         // Send to players who have object at client
         void SendObjectMessageToSet(WorldPacket *data, bool self, WorldObject const* except = nullptr) const;
         void SendMovementMessageToSet(WorldPacket data, bool self, WorldObject const* except = nullptr);
+        void AddMovementViewer(ObjectGuid guid) { if (IsCreature()) m_movementViewers.Add(guid); }
+        void RemoveMovementViewer(ObjectGuid guid) { if (IsCreature()) m_movementViewers.Remove(guid); }
+        void RemoveFromWorld() override
+        {
+            Object::RemoveFromWorld();
+            m_movementViewers.Clear();
+        }
 
         virtual void SendMessageToSetInRange(WorldPacket *data, float dist, bool self) const;
         void SendMessageToSetExcept(WorldPacket *data, Player const* skipped_receiver) const;
@@ -1113,10 +1186,25 @@ class WorldObject : public Object
         GameObject* FindRandomGameObject(uint32 entry, float range) const;
         Player* FindNearestPlayer(float range) const;
         void GetGameObjectListWithEntryInGrid(std::list<GameObject*>& lList, uint32 uiEntry, float fMaxSearchRange) const;
+        // AzerothCore set form, one visit per entry - cold callers, two or
+        // three entries.
+        void GetGameObjectListWithEntryInGrid(std::list<GameObject*>& lList, std::vector<uint32> const& entries, float fMaxSearchRange) const
+        {
+            for (uint32 entry : entries)
+                GetGameObjectListWithEntryInGrid(lList, entry, fMaxSearchRange);
+        }
         void GetCreatureListWithEntryInGrid(std::list<Creature*>& lList, uint32 uiEntry, float fMaxSearchRange) const;
+        // AzerothCore also takes a set of entries in one sweep. One grid visit
+        // per entry here - the callers pass two or three, on cold paths.
+        void GetCreatureListWithEntryInGrid(std::list<Creature*>& lList, std::vector<uint32> const& entries, float fMaxSearchRange) const
+        {
+            for (uint32 entry : entries)
+                GetCreatureListWithEntryInGrid(lList, entry, fMaxSearchRange);
+        }
         void GetAlivePlayerListInRange(WorldObject const* pSource, std::list<Player*>& lList, float fMaxSearchRange) const;
 
         bool isActiveObject() const { return m_isActiveObject || m_viewPoint.hasViewers(); }
+        bool IsActiveObject() const { return isActiveObject(); }
         void SetActiveObjectState(bool on);
 
         ViewPoint& GetViewPoint() { return m_viewPoint; }
@@ -1150,6 +1238,15 @@ class WorldObject : public Object
         uint32 GetCreatureSummonLimit() const;
         void SetCreatureSummonLimit(uint32 limit);
 
+#ifdef ENABLE_ELUNA
+        std::unique_ptr<ElunaProcessorInfo> elunaMapEvents;
+        std::unique_ptr<ElunaProcessorInfo> elunaWorldEvents;
+
+        Eluna* GetEluna() const;
+        ElunaEventProcessor* GetElunaEvents(int32 mapId);
+        LuaVal lua_data = LuaVal({});
+#endif
+
 virtual uint32 GetLevel() const = 0;
         uint32 GetLevelForTarget(WorldObject const* target = nullptr) const;
         uint16 GetSkillMaxForLevel(WorldObject const* target = nullptr) const { return GetLevelForTarget(target) * 5; };
@@ -1166,6 +1263,14 @@ virtual uint32 GetLevel() const = 0;
         SpellCastResult CastSpell(GameObject* pTarget, uint32 spellId, bool triggered, Item* castItem = nullptr, Aura* triggeredByAura = nullptr, ObjectGuid originalCaster = ObjectGuid(), SpellEntry const* triggeredBy = nullptr, SpellEntry const* triggeredByParent = nullptr);
         SpellCastResult CastSpell(GameObject* pTarget, SpellEntry const* spellInfo, bool triggered, Item* castItem = nullptr, Aura* triggeredByAura = nullptr, ObjectGuid originalCaster = ObjectGuid(), SpellEntry const* triggeredBy = nullptr, SpellEntry const* triggeredByParent = nullptr);
         void CastCustomSpell(Unit* pTarget, uint32 spellId, int32 const* bp0, int32 const* bp1, int32 const* bp2, bool triggered, Item* castItem = nullptr, Aura* triggeredByAura = nullptr, bool addThreat = true, ObjectGuid originalCaster = ObjectGuid(), SpellEntry const* triggeredBy = nullptr);
+        void CastCustomSpell(Unit* pTarget, uint32 spellId, int32 const* bp0, int32 const* bp1, int32 const* bp2, bool triggered, Item* castItem, Aura* triggeredByAura, ObjectGuid originalCaster)
+        {
+            CastCustomSpell(pTarget, spellId, bp0, bp1, bp2, triggered, castItem, triggeredByAura, true, originalCaster);
+        }
+        void CastCustomSpell(Unit* pTarget, uint32 spellId, int32 bp0, int32 bp1, int32 bp2, bool triggered, Item* castItem, Aura* triggeredByAura, ObjectGuid originalCaster)
+        {
+            CastCustomSpell(pTarget, spellId, &bp0, &bp1, &bp2, triggered, castItem, triggeredByAura, true, originalCaster);
+        }
         void CastCustomSpell(Unit* pTarget, SpellEntry const* spellInfo, int32 const* bp0, int32 const* bp1, int32 const* bp2, bool triggered, Item* castItem = nullptr, Aura* triggeredByAura = nullptr, bool addThreat = true, ObjectGuid originalCaster = ObjectGuid(), SpellEntry const* triggeredBy = nullptr);
         void CastCustomSpell(Unit* target, SpellEntry const* customInfo, bool triggered = false);
         SpellCastResult CastSpell(float x, float y, float z, uint32 spellId, bool triggered, Item *castItem = nullptr, Aura* triggeredByAura = nullptr, ObjectGuid originalCaster = ObjectGuid(), SpellEntry const* triggeredBy = nullptr);
@@ -1259,6 +1364,7 @@ virtual uint32 GetLevel() const = 0;
         float m_visibilityModifier;
 
         Map * m_currMap;                                    //current object's Map location
+        MovementViewerSet<ObjectGuid> m_movementViewers;
 
         uint32 m_mapId;                                     // object at map with map_id
         uint32 m_InstanceId;                                // in map copy with instance id

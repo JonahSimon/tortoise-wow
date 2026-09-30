@@ -113,6 +113,9 @@ namespace ai { namespace botdiag {
 #include "events/event_wareffort.h"
 #include "Logging/DatabaseLogger.hpp"
 #include "PerfStats.h"
+#ifdef ENABLE_ELUNA
+#include "LuaEngine.h"
+#endif
 #include "PlayerDump.h"
 #include "Shop/ShopMgr.h"
 
@@ -700,7 +703,11 @@ Player::Player(WorldSession *session) : Unit(),
 
     m_areaUpdateId = 0;
 
-    m_nextSave = sWorld.getConfig(CONFIG_UINT32_INTERVAL_SAVE);
+    uint32 const saveInterval = sWorld.getConfig(CONFIG_UINT32_INTERVAL_SAVE);
+    // Keep thousands of bot saves from re-forming into one periodic DB spike
+    // after a forced save or shutdown. Real-player timing remains unchanged.
+    m_nextSave = Script_IsMachineDriven(this) && saveInterval ?
+        urand(saveInterval * 3 / 4, saveInterval * 5 / 4) : saveInterval;
 
     // randomize first save time in range [CONFIG_UINT32_INTERVAL_SAVE] around [CONFIG_UINT32_INTERVAL_SAVE]
     // this must help in case next save after mass player load after server startup
@@ -844,11 +851,24 @@ Player::Player(WorldSession *session) : Unit(),
     ++PerfStats::g_totalPlayers;
 }
 
+// Implemented by mod-playerbots (PlayerbotMgr.cpp); PlayerbotStubs.cpp supplies
+// an empty body when BUILD_PLAYERBOTS=OFF. Same core->module seam as the
+// BotActionLog_ probes.
+void Playerbot_OnPlayerDestroyed(Player const* player);
+
 Player::~Player()
 {
     // Clear all pointers to this player in all zone scripts
     if (m_uint32Values)
         sZoneScriptMgr.OnPlayerGettingDestroyed(this);
+
+    // Same idea, for the bot holders' guid->Player maps. Without it an entry
+    // outlives its Player and every 'if (bot)' check downstream passes on freed
+    // memory - crash_2026-09-01_08-26-40 (IsFreeAltBot, this=0x0) and _14-34-37
+    // (AllowActivity, this=0x6ecf766476c57200). Clearing at the point of
+    // destruction is the one test that cannot mistake a Player between maps for
+    // a destroyed one, which is exactly what the earlier guard got wrong.
+    Playerbot_OnPlayerDestroyed(this);
 
     DeletePacketBroadcaster();
     RemoveAI();
@@ -1271,6 +1291,12 @@ uint32 Player::EnvironmentalDamage(EnvironmentalDamageType type, uint32 damage)
     SendEnvironmentalDamageLog(type, damage, absorb, resist);
 
     damage = DealDamage(this, damage, nullptr, SELF_DAMAGE, SPELL_SCHOOL_MASK_NORMAL, nullptr, false);
+
+#ifdef ENABLE_ELUNA
+    if (!IsAlive())
+        if (Eluna* e = GetEluna())
+            e->OnPlayerKilledByEnvironment(this, type);
+#endif
 
     // DealDamage not apply item durability loss at self damage
     // Confirmed on classic that dying from lava, fatigue and
@@ -2565,6 +2591,7 @@ bool Player::SwitchInstance(uint32 newInstanceId)
         return false;
 
     Map* oldmap = GetMap();
+    ++m_mapWorkGeneration;
 
     // Leave transport if absent from new instance
     // normally it should have switched before the player
@@ -2642,6 +2669,14 @@ bool Player::SwitchInstance(uint32 newInstanceId)
 
 bool Player::TeleportTo(uint32 mapid, float x, float y, float z, float orientation, uint32 options)
 {
+    // DIAG(temp, Z-GEIST): a dungeon-clear test tank ended up parked at
+    // Z=203 over the Deadmines (overworld height inside map 36). Every
+    // player teleport into that band logs loudly so a debugger can break on
+    // THIS line - inline-condition breakpoints proved unreliable here.
+    if (mapid == 36 && z > 150.0f)
+        sLog.outError("[Z-GEIST] %s teleport -> map36 %.1f/%.1f/%.1f (opts %u)",
+                      GetName(), x, y, z, options);
+
     if (!MapManager::IsValidMapCoord(mapid, x, y, z, orientation))
     {
         sLog.outError("TeleportTo: invalid map %d or absent instance template.", mapid);
@@ -3076,6 +3111,11 @@ void Player::RewardRage(uint32 damage, bool attacker)
 
     addRage *= sWorld.getConfig(CONFIG_FLOAT_RATE_POWER_RAGE_INCOME);
 
+    // Native 1.18.1 aura 227 modifies generated attacking rage, not rage from
+    // incoming damage or the separate damage-to-rage proc (aura 226).
+    if (attacker)
+        addRage *= GetTotalAuraMultiplier(SPELL_AURA_MOD_ATTACKING_RAGE_PERCENT);
+
     ModifyPower(POWER_RAGE, uint32(addRage * 10));
 }
 
@@ -3346,64 +3386,73 @@ void Player::RecallPvPGear()
     }
 }
 
-bool Player::CanInteractWithNPC(Creature const* pCreature, uint32 npcflagmask) const
+bool Player::CanInteractWithNPC(Creature const* pCreature, uint32 npcflagmask, char const** failureReason) const
 {
-    if (!pCreature)
+    if (failureReason)
+        *failureReason = "accepted";
+    auto reject = [failureReason](char const* reason)
+    {
+        if (failureReason)
+            *failureReason = reason;
         return false;
+    };
+
+    if (!pCreature)
+        return reject("npc_missing");
 
     // some basic checks
     if (!IsInWorld() || IsTaxiFlying())
-        return false;
+        return reject("player_not_in_world_or_on_taxi");
 
     // not in interactive state
     if (HasUnitState(UNIT_STAT_CAN_NOT_REACT_OR_LOST_CONTROL))
-        return false;
+        return reject("player_cannot_react");
 
     // appropriate npc type
     if (npcflagmask && !pCreature->HasFlag(UNIT_NPC_FLAGS, npcflagmask))
-        return false;
+        return reject("npc_service_flag_missing");
 
     if (npcflagmask == UNIT_NPC_FLAG_STABLEMASTER)
     {
         if (GetClass() != CLASS_HUNTER)
-            return false;
+            return reject("stable_requires_hunter");
     }
 
     if (!pCreature->IsAlive())
-        return false;
+        return reject("npc_dead");
 
     if (IsAlive() && pCreature->IsInvisibleForAlive())
-        return false;
+        return reject("npc_invisible_for_alive");
 
     if (!IsAlive() && !pCreature->HasTypeFlag(CREATURE_TYPEFLAGS_GHOST_VISIBLE))
-        return false;
+        return reject("npc_not_ghost_visible");
 
     // not allow interaction under control, but allow with own pets
     if (pCreature->GetCharmerGuid())
-        return false;
+        return reject("npc_charmed");
 
     // not enemy
    if (pCreature->IsHostileTo(this))
-        return false;
+        return reject("npc_hostile");
 
     // combat check
     if (pCreature->IsInCombat())
-        return false;
+        return reject("npc_in_combat");
 
     // not interactable
     if (pCreature->HasFlag(UNIT_FIELD_FLAGS, UNIT_FLAG_NOT_SELECTABLE))
-        return false;
+        return reject("npc_not_selectable");
 
     // not unfriendly
     if (FactionTemplateEntry const* factionTemplate = sObjectMgr.GetFactionTemplateEntry(pCreature->GetFactionTemplateId()))
         if (factionTemplate->faction)
             if (FactionEntry const* faction = sObjectMgr.GetFactionEntry(factionTemplate->faction))
                 if (faction->reputationListID >= 0 && GetReputationMgr().GetRank(faction) <= REP_UNFRIENDLY)
-                    return false;
+                    return reject("reputation_unfriendly");
 
     // not too far
     if (!pCreature->IsWithinDistInMap(this, INTERACTION_DISTANCE))
-        return false;
+        return reject("npc_out_of_range_or_map");
 
     return true;
 }
@@ -3693,6 +3742,10 @@ void Player::GiveXP(uint32 xp, Unit* victim)
     if (!IsAlive())
         return;
 
+    if (HasChallenge(CHALLENGE_BREWMASTER) &&
+        GetDrunkenstateByValue(GetDrunkValue()) != DRUNKEN_SMASHED)
+        return;
+
     uint32 level = GetLevel();
 
     if (IsHardcore() && InBattleGround())
@@ -3878,6 +3931,15 @@ void Player::GiveLevel(uint32 level)
             AwardTitle(TITLE_THE_WANDERER);
             MailVagrantModeRewards(level);
         }
+    }
+
+    if (HasChallenge(CHALLENGE_CRAFTMASTER) && level == PLAYER_MAX_LEVEL)
+        AwardTitle(TITLE_CRAFTMASTER);
+
+    if (HasChallenge(CHALLENGE_BREWMASTER) && level == PLAYER_MAX_LEVEL)
+    {
+        AwardTitle(TITLE_BREWMASTER);
+        MailBrewmasterModeRewards();
     }
 
     if (HasChallenge(CHALLENGE_BOARING_MODE))
@@ -5898,6 +5960,11 @@ void Player::ResurrectPlayer(float restore_percent, bool applySickness, bool for
     // update visibility of player for nearby cameras
     UpdateObjectVisibility();
 
+#ifdef ENABLE_ELUNA
+    if (Eluna* e = GetEluna())
+        e->OnResurrect(this);
+#endif
+
     if (!applySickness)
         return;
 
@@ -7006,6 +7073,10 @@ bool Player::UpdateSkillPro(uint16 SkillId, int32 Chance, uint32 step)
         SetUInt32Value(valueIndex, MAKE_SKILL_VALUE(new_value, MaxValue));
         if (itr->second.uState != SKILL_NEW)
             itr->second.uState = SKILL_CHANGED;
+#ifdef ENABLE_ELUNA
+        if (Eluna* e = GetEluna())
+            e->OnSkillChange(this, SkillId, new_value);
+#endif
         DEBUG_LOG("Player::UpdateSkillPro Chance=%3.1f%% taken", Chance / 10.0);
         return true;
     }
@@ -7136,7 +7207,7 @@ void Player::UpdateSkillsForLevel()
         if (!pSkill)
             continue;
 
-        SkillRaceClassInfoEntry const* rcEntry = GetSkillRaceClassInfo(pskill, GetRace(), GetClass());
+        SkillRaceClassInfoEntry const* rcEntry = sSpellMgr.GetSkillRaceClassInfo(pskill, GetRace(), GetClass());
         if (!rcEntry)
             continue;
 
@@ -7508,7 +7579,7 @@ void Player::UpdateSpellTrainedSkills(uint32 spellId, bool apply, bool hardReset
                 if (HasSkill(uint16(pSkill->id)))
                     continue;
 
-                SkillRaceClassInfoEntry const* rcInfo = GetSkillRaceClassInfo(pSkill->id, GetRace(), GetClass());
+                SkillRaceClassInfoEntry const* rcInfo = sSpellMgr.GetSkillRaceClassInfo(pSkill->id, GetRace(), GetClass());
                 if (!rcInfo)
                     continue;
 
@@ -8056,6 +8127,9 @@ void Player::RewardReputation(Unit *pVictim, float rate)
     if (pVictim->IsPet())
         return;
 
+    if (static_cast<Creature*>(pVictim)->IsReputationGainDisabled())
+        return;
+
     ReputationOnKillEntry const* Rep = sObjectMgr.GetReputationOnKillEntry(((Creature*)pVictim)->GetEntry());
 
     if (!Rep)
@@ -8134,7 +8208,7 @@ uint32 Player::GetGuildIdFromDB(ObjectGuid guid)
 
 uint32 Player::GetRankFromDB(ObjectGuid guid)
 {
-    QueryResult *result = CharacterDatabase.PQuery("SELECT rank FROM guild_member WHERE guid='%u'", guid.GetCounter());
+    QueryResult *result = CharacterDatabase.PQuery("SELECT `rank` FROM guild_member WHERE guid='%u'", guid.GetCounter());
     if (result)
     {
         uint32 v = result->Fetch()[0].GetUInt32();
@@ -11832,6 +11906,14 @@ InventoryResult Player::CanEquipItem(uint8 slot, uint16 &dest, ItemPrototype con
             if (IsInCombat() && pProto->Class == ITEM_CLASS_WEAPON && m_weaponChangeTimer != 0)
                 return EQUIP_ERR_CANT_DO_RIGHT_NOW;         // maybe exist better err
 
+            if (HasChallenge(CHALLENGE_CRAFTMASTER) && GetLevel() < PLAYER_MAX_LEVEL &&
+                pProto->InventoryType != INVTYPE_TABARD &&
+                (!pItem || pItem->GetGuidValue(ITEM_FIELD_CREATOR) != GetObjectGuid()))
+            {
+                GetSession()->SendNotification("You can only equip items you crafted yourself in the Traveling Craftmaster challenge.");
+                return EQUIP_ERR_CANT_DO_RIGHT_NOW;
+            }
+
             if (HasChallenge(CHALLENGE_VAGRANT_MODE) && GetLevel() < PLAYER_MAX_LEVEL)
             {
                 if (pProto->Quality > ITEM_QUALITY_NORMAL)
@@ -12294,6 +12376,11 @@ Item* Player::StoreNewItem(ItemPosCountVec const& dest, uint32 item, bool update
         if (randomPropertyId)
             pItem->SetItemRandomProperties(randomPropertyId);
         pItem = StoreItem(dest, pItem, update);
+#ifdef ENABLE_ELUNA
+        if (pItem)
+            if (Eluna* e = GetEluna())
+                e->OnAdd(this, pItem);
+#endif
     }
     return pItem;
 }
@@ -15918,6 +16005,11 @@ void Player::SetQuestStatus(uint32 quest_id, QuestStatus status)
 
         UpdateForQuestWorldObjects();
     }
+
+#ifdef ENABLE_ELUNA
+    if (Eluna* e = GetEluna())
+        e->OnQuestStatusChanged(this, quest_id, status);
+#endif
 }
 
 void Player::AdjustQuestReqItemCount(Quest const* pQuest, QuestStatusData& questStatusData)
@@ -16589,7 +16681,7 @@ void Player::SendPushToPartyResponse(Player *pPlayer, uint8 msg) const
     }
 }
 
-void Player::SendQuestUpdateAddItem(Quest const* pQuest, uint32 item_idx, uint32 current, uint32 count)
+void Player::SendQuestUpdateAddItem(Quest const* pQuest, uint32 item_idx, uint32 /*current*/, uint32 count)
 {
     DEBUG_LOG("WORLD: Sent SMSG_QUESTUPDATE_ADD_ITEM");
     WorldPacket data(SMSG_QUESTUPDATE_ADD_ITEM, (4 + 4));
@@ -16597,10 +16689,10 @@ void Player::SendQuestUpdateAddItem(Quest const* pQuest, uint32 item_idx, uint32
     data << count;
     GetSession()->SendPacket(&data);
 
-    // Update player field and fire UNIT_QUEST_LOG_CHANGED for self
-    uint16 slot = FindQuestSlot(pQuest->GetQuestId());
-    if (slot < MAX_QUEST_LOG_SIZE)
-        SetQuestSlotCounter(slot + pQuest->GetReqCreatureOrGOcount(), uint8(item_idx), uint8(current + count));
+    // ItemAddedQuestCheck already updates/persists m_itemcount. The packet
+    // updates the quest watcher; packed quest-log counters belong to creature/
+    // GO objectives, not items. Writing slot + objective count corrupts another
+    // quest (or fields beyond the quest log when this is the last slot).
 }
 
 void Player::SendQuestUpdateAddCreatureOrGo(Quest const* pQuest, ObjectGuid guid, uint32 creatureOrGO_idx, uint32 count)
@@ -21006,6 +21098,7 @@ void Player::UpdateVisibilityOf(WorldObject const* viewPoint, WorldObject* targe
             target->DestroyForPlayer(this);
             std::unique_lock<std::shared_mutex> lock(m_visibleGUIDs_lock);
             m_visibleGUIDs.erase(t_guid);
+            target->RemoveMovementViewer(GetObjectGuid());
             lock.unlock();
 
             if (Player* plTarget = target->ToPlayer())
@@ -21024,6 +21117,7 @@ void Player::UpdateVisibilityOf(WorldObject const* viewPoint, WorldObject* targe
             {
                 std::unique_lock<std::shared_mutex> lock(m_visibleGUIDs_lock);
                 m_visibleGUIDs.insert(target->GetObjectGuid());
+                target->AddMovementViewer(GetObjectGuid());
                 lock.unlock();
 
                 if (Player* plTarget = target->ToPlayer())
@@ -21056,17 +21150,6 @@ inline void UpdateVisibilityOf_helper(ObjectGuidSet& s64, GameObject* target)
 }
 
 template<class T>
-void AddBroadcastListener(T* target, Player* me)
-{
-}
-template<>
-void AddBroadcastListener(Player* target, Player* me)
-{
-    if (target->m_broadcaster)
-        target->m_broadcaster->AddListener(me);
-}
-
-template<class T>
 void RemoveBroadcastListener(T* target, Player* me)
 {
 }
@@ -21075,6 +21158,21 @@ void RemoveBroadcastListener(Player* target, Player* me)
 {
     if (target->m_broadcaster)
         target->m_broadcaster->RemoveListener(me);
+}
+
+void Player::ActivateBroadcastListeners(std::set<WorldObject*> const& visibleNow)
+{
+    // The caller sends the complete create/out-of-range UpdateData first.  Only
+    // then may the async movement broadcaster target this client; otherwise a
+    // busy player or bot can deliver SMSG_MONSTER_MOVE ahead of its create block.
+    for (WorldObject* object : visibleNow)
+    {
+        if (object)
+            object->AddMovementViewer(GetObjectGuid());
+        if (Player* target = object ? object->ToPlayer() : nullptr)
+            if (target->m_broadcaster)
+                target->m_broadcaster->AddListener(this);
+    }
 }
 
 template<class T>
@@ -21094,6 +21192,7 @@ void Player::UpdateVisibilityOf(WorldObject const* viewPoint, T* target, UpdateD
             target->BuildOutOfRangeUpdateBlock(&data);
             std::unique_lock<std::shared_mutex> lock(m_visibleGUIDs_lock);
             m_visibleGUIDs.erase(t_guid);
+            target->RemoveMovementViewer(GetObjectGuid());
             lock.unlock();
 
             RemoveBroadcastListener(target, this);
@@ -21110,7 +21209,6 @@ void Player::UpdateVisibilityOf(WorldObject const* viewPoint, T* target, UpdateD
             UpdateVisibilityOf_helper(m_visibleGUIDs, target);
             lock.unlock();
 
-            AddBroadcastListener(target, this);
             DEBUG_FILTER_LOG(LOG_FILTER_VISIBILITY_CHANGES, "%s is visible now for %s. Distance = %f", target->GetGuidStr().c_str(), GetGuidStr().c_str(), GetDistance(target));
         }
     }
@@ -21586,11 +21684,15 @@ void Player::LearnGameMasterSpells()
 
 void Player::SetSemaphoreTeleportNear(bool semphsetting)
 {
+    if (semphsetting)
+        ++m_mapWorkGeneration;
     mSemaphoreTeleport_Near = semphsetting;
 }
 
 void Player::SetSemaphoreTeleportFar(bool semphsetting)
 {
+    if (semphsetting)
+        ++m_mapWorkGeneration;
     mSemaphoreTeleport_Far = semphsetting;
 }
 
@@ -21763,9 +21865,9 @@ bool Player::IsSpellFitByClassAndRace(uint32 spell_id, uint32* pReqlevel /*= nul
             continue;
 
         SkillRaceClassInfoMapBounds bounds = sSpellMgr.GetSkillRaceClassInfoMapBounds(abilityEntry->skillId);
-        for (SkillRaceClassInfoMap::const_iterator itr = bounds.first; itr != bounds.second; ++itr)
+        for (SkillRaceClassInfoValueMap::const_iterator itr = bounds.first; itr != bounds.second; ++itr)
         {
-            SkillRaceClassInfoEntry const* skillRCEntry = itr->second;
+            SkillRaceClassInfoEntry const* skillRCEntry = &itr->second;
             if ((skillRCEntry->raceMask & racemask) && (skillRCEntry->classMask & classmask))
             {
                 if (skillRCEntry->flags & ABILITY_SKILL_NONTRAINABLE)
@@ -22793,7 +22895,7 @@ void Player::_LoadSkills(QueryResult *result)
                 continue;
             }
 
-            SkillRaceClassInfoEntry const* rcEntry = GetSkillRaceClassInfo(skill, GetRace(), GetClass());
+            SkillRaceClassInfoEntry const* rcEntry = sSpellMgr.GetSkillRaceClassInfo(skill, GetRace(), GetClass());
             if (!rcEntry)
             {
                 sLog.outError("Character %u has forbidden skill %u for his race / class combination.", GetGUIDLow(), skill);
@@ -24222,6 +24324,10 @@ void Player::RefreshVisiblePlayersForClient()
 
     for (const ObjectGuid& guid : players)
     {
+        if (Player* target = GetMap()->GetPlayer(guid))
+            if (target->m_broadcaster)
+                target->m_broadcaster->RemoveListener(this);
+
         WorldPacket data(SMSG_DESTROY_OBJECT, 8);
         data << guid;
         GetSession()->SendPacket(&data);
@@ -24620,12 +24726,25 @@ void Player::HandleStealthedUnitsDetection()
         {
             if (!IsInVisibleList_Unsafe(stealthedUnit))
             {
+                // LOCKED. Every other writer of m_visibleGUIDs takes the
+                // unique_lock; these two in the stealth sweep did not, and a
+                // reader on another thread holding the shared_lock then died
+                // inside _Hashtable::find - four times on 2026-08-29, always
+                // from Group::UpdatePlayerOutOfRange. A reader's lock is worth
+                // nothing while a writer ignores it. Narrow on purpose: the
+                // send below must not run under a write lock.
+                {
+                    std::unique_lock<std::shared_mutex> lock(m_visibleGUIDs_lock);
+                    m_visibleGUIDs.insert(stealthedUnit->GetObjectGuid());
+                }
+                stealthedUnit->SendCreateUpdateToPlayer(this);
+                stealthedUnit->AddMovementViewer(GetObjectGuid());
+
+                // Do not expose this socket to the asynchronous movement queue
+                // until the object's create block has been queued first.
                 if (Player* i_player = stealthedUnit->ToPlayer())
                     if (i_player->m_broadcaster)
                         i_player->m_broadcaster->AddListener(this);
-
-                m_visibleGUIDs.insert(stealthedUnit->GetObjectGuid());
-                stealthedUnit->SendCreateUpdateToPlayer(this);
             }
         }
         else
@@ -24638,7 +24757,11 @@ void Player::HandleStealthedUnitsDetection()
                     if (i_player->m_broadcaster)
                         i_player->m_broadcaster->RemoveListener(this);
 
-                m_visibleGUIDs.erase(stealthedUnit->GetObjectGuid());
+                {
+                    std::unique_lock<std::shared_mutex> lock(m_visibleGUIDs_lock);
+                    m_visibleGUIDs.erase(stealthedUnit->GetObjectGuid());
+                    stealthedUnit->RemoveMovementViewer(GetObjectGuid());
+                }
             }
         }
     }
@@ -24652,6 +24775,17 @@ bool Player::IsInVisibleList(WorldObject const* u) const
     std::shared_lock<std::shared_mutex> lock(m_visibleGUIDs_lock);
     bool atClient = m_visibleGUIDs.find(u->GetObjectGuid()) != m_visibleGUIDs.end();
     return atClient; 
+}
+
+void Player::ClearVisibleObjects()
+{
+    std::unique_lock<std::shared_mutex> lock(m_visibleGUIDs_lock);
+    if (Map* map = FindMap())
+        for (ObjectGuid guid : m_visibleGUIDs)
+            if (guid.IsCreatureOrPet())
+                if (Creature* creature = map->GetAnyTypeCreature(guid))
+                    creature->RemoveMovementViewer(GetObjectGuid());
+    m_visibleGUIDs.clear();
 }
 
 
@@ -24776,10 +24910,33 @@ void Player::MailVagrantModeRewards(uint32 level)
 void Player::MailBoaringModeRewards(uint32 level)
 {
     Item* ToMailItem = Item::CreateItem(40998, 1, this);
+    // CreateItem returns nullptr when the item template is missing - and 40998
+    // is not in every world database (ours, 2026-09-04). The title was already
+    // awarded; do not take the server down over the mail.
+    if (!ToMailItem)
+    {
+        sLog.outError("[Challenge] Boaring reward item 40998 missing from item_template - no mail for %s", GetName());
+        return;
+    }
     ToMailItem->SaveToDB();
 
     MailDraft("Boar's Honor Pack", "Took you long enough! Here's your boar and sword.")
         .AddItem(ToMailItem)
+        .SendMailTo(this, MailSender(MAIL_CREATURE, uint32(16547), MAIL_STATIONERY_DEFAULT), MAIL_CHECK_MASK_COPIED, 0, 30 * DAY);
+}
+
+void Player::MailBrewmasterModeRewards()
+{
+    Item* reward = Item::CreateItem(GetTeam() == ALLIANCE ? 81234 : 80455, 1, this);
+    if (!reward)
+    {
+        sLog.outError("[Challenge] Brewmaster reward mount missing from item_template - no mail for %s", GetName());
+        return;
+    }
+    reward->SaveToDB();
+
+    MailDraft("Master of the Brew", "Congratulations on reaching level 60 while walking the Path of the Brewmaster! Accept this Brewfest mount as a reward for your spirited journey.")
+        .AddItem(reward)
         .SendMailTo(this, MailSender(MAIL_CREATURE, uint32(16547), MAIL_STATIONERY_DEFAULT), MAIL_CHECK_MASK_COPIED, 0, 30 * DAY);
 }
 
@@ -25804,6 +25961,18 @@ bool Player::HasEarnedTitle(uint8 titleId)
     case TITLE_THE_WANDERER:
     {
         if (GetLevel() == PLAYER_MAX_LEVEL && HasChallenge(CHALLENGE_VAGRANT_MODE))
+            return true;
+        break;
+    }
+    case TITLE_CRAFTMASTER:
+    {
+        if (GetLevel() == PLAYER_MAX_LEVEL && HasChallenge(CHALLENGE_CRAFTMASTER))
+            return true;
+        break;
+    }
+    case TITLE_BREWMASTER:
+    {
+        if (GetLevel() == PLAYER_MAX_LEVEL && HasChallenge(CHALLENGE_BREWMASTER))
             return true;
         break;
     }
