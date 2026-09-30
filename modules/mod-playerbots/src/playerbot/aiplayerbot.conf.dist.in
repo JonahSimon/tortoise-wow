@@ -1212,7 +1212,7 @@ AiPlayerbot.RndBotCheats = taxi,repair,breath,item
 
 # Allowed log files. See SPP_MAP for more information
 # https://github.com/mostlikely4r/spp-map
-AiPlayerbot.AllowedLogFiles =
+AiPlayerbot.AllowedLogFiles = bot_events.csv,deaths.csv,pvp_seek.csv
 
 # Filters certain actions from showing up in 'nc +debug' and 'nc +debug action'
 # AiPlayerbot.DebugFilter = add gathering loot,check values,emote,check mount state,jump

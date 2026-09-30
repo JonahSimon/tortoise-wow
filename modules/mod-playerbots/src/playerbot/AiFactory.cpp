@@ -996,6 +996,8 @@ void AiFactory::AddDefaultNonCombatStrategies(Player* player, PlayerbotAI* const
         if (sPlayerbotAIConfig.worldPvpSeek && urand(0, 99) < sPlayerbotAIConfig.worldPvpSeekBotPercent)
         {
             nonCombatEngine->addStrategy("world pvp");
+            if (sPlayerbotAIConfig.hasLog("pvp_seek.csv"))
+                sPlayerbotAIConfig.log("pvp_seek.csv", (sPlayerbotAIConfig.GetTimestampStr() + "+00,grant," + player->GetName()).c_str());
         }
 
         if (sPlayerbotAIConfig.randomBotJoinLfg)
