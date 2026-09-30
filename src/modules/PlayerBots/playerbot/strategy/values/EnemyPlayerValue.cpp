@@ -67,6 +67,11 @@ std::list<ObjectGuid> EnemyPlayersValue::Calculate()
                     Unit* target = ai->GetUnit(guid);
                     if (IsValid(target, bot) && IsWorldPvpTarget((Player*)target))
                     {
+                        // One csv line per new engagement (not per tick): bot is not on this target yet.
+                        if (bot->GetObjectGuid() != target->GetObjectGuid() && bot->GetSelectionGuid() != target->GetObjectGuid() &&
+                            sPlayerbotAIConfig.hasLog("pvp_seek.csv"))
+                            sPlayerbotAIConfig.log("pvp_seek.csv", (sPlayerbotAIConfig.GetTimestampStr() + "+00,seek," +
+                                bot->GetName() + "," + target->GetName()).c_str());
                         result.push_back(guid);
                         if (getOne)
                             break;
